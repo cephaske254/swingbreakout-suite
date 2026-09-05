@@ -42,6 +42,18 @@ Their default values live in one place,
 `Indicators/SwingBreakoutSFPSignal/SwingBreakoutSFPSignal/SharedSignalDefaults.cs`,
 referenced by both files' `[Parameter]` attributes.
 
+## Testing status
+
+Tested on **XAUUSD** with the robot's **default parameters** (matching the
+tested XAUUSD M1 `.cbotset`). The most recent run is a 3-day M1 backtest
+(08/09/2026-11/09/2026) via `ctrader-cli backtest`: +23.11% ROI on a $200
+starting balance across a single trade. See
+[`Robots/Swingbreakouttrader/BACKTESTS.md`](Robots/Swingbreakouttrader/BACKTESTS.md)
+for the full write-up, method, and caveats (single-trade sample size, zero
+simulated spread/commission, M1 bar replay) — read those caveats before
+treating this as validation of an edge. The raw report JSON is attached at
+[`Robots/Swingbreakouttrader/backtests/XAUUSD-m1_2026-09-08_to_2026-09-11.json`](Robots/Swingbreakouttrader/backtests/XAUUSD-m1_2026-09-08_to_2026-09-11.json).
+
 ## Disclaimer
 
 Always run on a demo account and backtest across a meaningful date range
