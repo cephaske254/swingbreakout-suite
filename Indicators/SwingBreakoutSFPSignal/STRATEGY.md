@@ -53,7 +53,7 @@ distance threshold so a bare tick through the level doesn't count.
 One bar is enough — the wick-through and the close-back-through both happen
 on the same bar.
 
-![SFP detection diagram](sfp-detection-diagram.svg)
+![SFP detection diagram](../../sfp-detection-diagram.svg)
 
 ### B&R (Break & Retest) — two bars minimum, no fixed window
 
@@ -77,7 +77,7 @@ on the same bar.
    no B&R is registered for it, and the level goes back to being
    unbroken/available for a fresh break or SFP later.
 
-![B&R detection diagram](bnr-detection-diagram.svg)
+![B&R detection diagram](../../bnr-detection-diagram.svg)
 
 ## Entry sequence (buy setup — mirror for sell)
 
@@ -108,7 +108,7 @@ Sell setups mirror all of the above (A = swing high, B = bottom of first leg
 down, C = top of first retracement, D = new low, SL above C or A, target
 below D by the same 2.618x C→D leg projection).
 
-![Entry sequence diagram: A/B/C/D, the 100% extension, and the 50% D→C entry](strategy-entry-diagram.svg)
+![Entry sequence diagram: A/B/C/D, the 100% extension, and the 50% D→C entry](../../strategy-entry-diagram.svg)
 
 ## Status
 

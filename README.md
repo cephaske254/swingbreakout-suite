@@ -42,6 +42,16 @@ Their default values live in one place,
 `Indicators/SwingBreakoutSFPSignal/SwingBreakoutSFPSignal/SharedSignalDefaults.cs`,
 referenced by both files' `[Parameter]` attributes.
 
+## Strategy diagrams
+
+![SFP detection diagram](sfp-detection-diagram.svg)
+
+![B&R detection diagram](bnr-detection-diagram.svg)
+
+![Entry sequence diagram: A/B/C/D, the 100% extension, and the 50% D→C entry](strategy-entry-diagram.svg)
+
+See [`Indicators/SwingBreakoutSFPSignal/STRATEGY.md`](Indicators/SwingBreakoutSFPSignal/STRATEGY.md) for the full write-up these diagrams belong to.
+
 ## Testing status
 
 Tested on **XAUUSD** with the robot's **default parameters** (matching the
