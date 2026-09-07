@@ -1,58 +1,76 @@
 # Market Structure Gaps — SwingBreakoutSFPSignal / SwingBreakoutTrader
 
-Review notes on where the current indicator/bot pair falls short of a genuine
-market-structure trading approach. Written before any redesign work, to serve
-as the basis for a follow-up discussion.
+Originally written before the strategy redesign captured in `STRATEGY.md`, as
+a review of where this pair fell short of a full ICT/SMC-style market-
+structure system. That redesign has since happened: `STRATEGY.md` is now the
+user's own complete, deliberately scoped specification (level-reaction
+SFP/B&R + an A-B-C-D fib-extension entry), and its Status section is explicit
+that nothing beyond what it describes is in scope. Most of the original list
+below turned out to be describing concepts the user's method never wanted,
+not oversights to fix - this revision separates the two.
 
-## 1. Trend/regime is SMA-based, not structure-based
+## Still true today
 
-`RequireTrendFilter` gates entries on a 20/200 SMA pair on the higher
-timeframe. That's indicator-based trend-following, not market structure. A
-structure-driven approach should derive trend from the sequence of swings
-themselves (higher-highs/higher-lows = bullish structure, lower-highs/
-lower-lows = bearish), not from a moving average. The SMA and the
-swing-structure logic never talk to each other today.
+**Trend/regime is SMA-based, not structure-based.** `RequireTrendFilter`
+gates entries on a 20/200 SMA pair on `TrendTimeFrame` (`TrendFilterOK` in
+`SwingBreakoutSFPSignal.cs`). A structure-driven trend read (higher-highs/
+higher-lows vs. lower-highs/lower-lows from the swing sequence itself) would
+be a different, and arguably more consistent, way to gate direction - the SMA
+and the swing-structure logic still never talk to each other. This remains a
+legitimate design option, not something STRATEGY.md rules out; it just isn't
+what's built.
 
-## 2. BOS/CHoCH exists internally but isn't used as a signal
+**Only one swing is tracked per side.** The indicator remembers "the current
+unbroken swing high" and "the current unbroken swing low," full stop - no
+sequence history (HH → HL → HH ...) and no internal/minor vs. external/major
+structure distinction (everything uses the same `SwingLeftBars`/
+`SwingRightBars`). Per STRATEGY.md's implementation notes, this is
+intentional for the A-B-C-D sequence itself (A/B tracked as running extremes,
+not fixed anchors) - but it does mean there's no broader "market structure"
+picture beyond the single active swing on each side.
 
-`swingHighBroken`/`swingLowBroken` already detect a break of structure, but
-only as bookkeeping to decide which pivot is allowed to replace the tracked
-swing. There's no CHoCH detection (first break in the *opposite* direction of
-the prevailing structure, signaling a possible reversal) and no entry trigger
-built directly off a confirmed BOS.
+## Resolved, in spirit, since this was written
 
-## 3. Only one swing is tracked per side — no structure history
+**A structural break now IS an entry trigger** - B&R detection
+(`FindBrokenLevel`/`ProcessBnR`) fires on a close beyond `lastSwingHigh`/
+`lastSwingLow` when `TrackPriorSwing` is on, exactly as it does for PDH/PDL/
+PDC/HCOM/LCOM. That's a break of structure driving the A-B-C-D sequence,
+which is most of what the original "BOS exists internally but isn't used as
+a signal" gap was asking for. What's still missing is CHoCH specifically
+(the first break in the *opposite* direction of the prevailing structure,
+read as a reversal signal distinct from a same-direction continuation break)
+- there's no concept of "prevailing structure direction" for a break to
+oppose, since trend here comes from the SMA filter, not from structure.
 
-The indicator remembers "the current unbroken swing high" and "the current
-unbroken swing low," full stop. There's no sequence (HH → HL → HH ...) to
-classify the trend regime or detect a shift, and no concept of "internal"
-(minor) vs. "external" (major) structure — everything uses the same
-`SwingLeftBars`/`SwingRightBars`.
+## Out of scope by design, not a gap
 
-## 4. Levels are fixed reference points, not liquidity concepts
+These describe an ICT/SMC-style liquidity/structure system the user's
+method (STRATEGY.md) never asked for. Listed here only so a future reader
+doesn't mistake "not built" for "forgotten":
 
-PDH/PDL, weekly/monthly OR, HCOM/LCOM are all legitimate levels, but there's
-no equal-highs/equal-lows detection (a core liquidity-pool concept) and no
-order blocks or fair value gaps — the things price is actually drawn to /
-rebalances against in a structure-based read.
+- Equal-highs/equal-lows liquidity pools, order blocks, fair value gaps -
+  the user's levels are PDH/PDL/PDC, HCOM/LCOM, and swing high/low, full
+  stop. Nothing else feeds the SFP/B&R reaction check.
+- Multi-timeframe structural alignment (e.g. daily bias / 4H structure /
+  entry-TF trigger) - the design uses exactly one higher timeframe, and
+  only for the SMA trend filter, not for a second structural opinion.
+- Premium/discount zone biasing of targets or eligible levels - there is no
+  Fibonacci-retracement-zone filter in the current parameter set at all (an
+  earlier `RequireFibRetracement` parameter this document used to reference
+  has been removed); the only Fibonacci math left is the A-B-C-D
+  extension/retracement arithmetic STRATEGY.md specifies for entry/stop/
+  target, which is a different thing from a premium/discount gate.
 
-## 5. Multi-timeframe structure is thin
+## If either "still true" item is ever worth pursuing
 
-Only one higher timeframe is used, and only for a single swing point plus the
-SMA trend. A structural approach usually wants at least two layers (e.g.,
-daily bias / 4H structure / entry-TF trigger) with explicit alignment, not
-just "aware of one HTF pivot."
+1. Structure-based trend (HH/HL vs. LH/LL from the swing sequence) as an
+   alternative or complement to the SMA filter - the more consistent fix,
+   since it would use the same swing-detection machinery the strategy
+   already runs, rather than a second, unrelated indicator family.
+2. True CHoCH detection - would need a notion of "current structural bias"
+   to define what counts as the *opposite* direction, which doesn't exist
+   yet in a codebase whose only bias signal today is the SMA.
 
-## 6. Premium/discount is underused
-
-The Fib retracement filter (`RequireFibRetracement`) checks the 50–100% zone,
-but it's optional/off by default and only gates entry — it isn't used to bias
-targets or filter which liquidity levels are even eligible.
-
-## Priority if addressed
-
-1. BOS/CHoCH as an actual entry trigger
-2. Structure-based trend instead of SMA
-3. Equal-highs/equal-lows liquidity detection
-4. (then) swing-sequence history, multi-timeframe alignment, premium/discount
-   integration, order blocks / FVGs
+Either belongs to a genuine strategy extension, not a bug fix - confirm with
+the user before building, since STRATEGY.md currently states the method is
+complete as specified.
