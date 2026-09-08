@@ -1,0 +1,259 @@
+{
+  "main": {
+    "utcOffset": 0,
+    "language": "en",
+    "depositAsset": "USD",
+    "depositAssetDigits": 2,
+    "period": "m1",
+    "symbol": "XAUUSD",
+    "brokerTitle": "",
+    "cBotName": "Swingbreakouttrader",
+    "roi": -4.08,
+    "netProfit": -8.15,
+    "startingCapital": 200,
+    "endingEquity": 191.85,
+    "endingBalance": 191.85,
+    "testingPeriod": {
+      "duration": "3d",
+      "startDate": 1788307200000,
+      "endDate": 1788566400000,
+      "formatted": "3d (02/09/2026 - 05/09/2026)"
+    },
+    "accountType": "hedging",
+    "accountLeverage": 400,
+    "data": {
+      "type": "m1BarsFromServer",
+      "isCustom": false,
+      "customName": null
+    },
+    "spread": {
+      "type": "fixed",
+      "min": null,
+      "max": null,
+      "value": 0
+    },
+    "commissions": {
+      "type": "usdPerMillionUsdVolume",
+      "value": 0,
+      "applyCommissionAutomatically": false
+    },
+    "theme": "dark",
+    "titleKind": "backtesting",
+    "authorNickName": "cephasktoo",
+    "authorLink": null,
+    "cBotLink": null,
+    "embedded": false
+  },
+  "equity": {
+    "points": [
+      {
+        "balance": 200,
+        "minEquity": 200,
+        "maxEquity": 200,
+        "timestamp": 1788307200000
+      },
+      {
+        "balance": 191.85,
+        "minEquity": 193.41,
+        "maxEquity": 200.31,
+        "timestamp": 1788507060000
+      },
+      {
+        "balance": 191.85,
+        "minEquity": 191.85,
+        "maxEquity": 191.85,
+        "timestamp": 1788555240000
+      }
+    ],
+    "maxBalanceDrawdownPercent": 4.075000000000003,
+    "maxEquityDrawdownPercent": 4.22345364684739,
+    "maxBalanceDrawdownAbsolute": 8.150000000000006,
+    "maxEquityDrawdownAbsolute": 8.460000000000008
+  },
+  "tradeStatistics": {
+    "netProfit": {
+      "all": -8.15,
+      "long": 0,
+      "short": -8.15
+    },
+    "profitFactor": {
+      "all": 0,
+      "long": 0,
+      "short": 0
+    },
+    "commissions": {
+      "all": 0,
+      "long": 0,
+      "short": 0
+    },
+    "swaps": {
+      "all": 0,
+      "long": 0,
+      "short": 0
+    },
+    "totalTrades": {
+      "all": 1,
+      "long": 0,
+      "short": 1
+    },
+    "winningTrades": {
+      "all": 0,
+      "long": 0,
+      "short": 0
+    },
+    "maxConsecutiveWinningTrades": {
+      "all": 0,
+      "long": 0,
+      "short": 0
+    },
+    "largestWinningTrade": {
+      "all": 0,
+      "long": 0,
+      "short": 0
+    },
+    "losingTrades": {
+      "all": 1,
+      "long": 0,
+      "short": 1
+    },
+    "maxConsecutiveLosingTrades": {
+      "all": 1,
+      "long": 0,
+      "short": 1
+    },
+    "largestLosingTrade": {
+      "all": -8.15,
+      "long": 0,
+      "short": -8.15
+    },
+    "averageTrade": {
+      "all": -8.15,
+      "long": 0,
+      "short": -8.15
+    }
+  },
+  "usedSymbols": [
+    {
+      "symbol": "XAUUSD",
+      "period": "m1",
+      "swapTime": "21:00",
+      "baseAsset": "XAU",
+      "baseAssetDigits": 2,
+      "quoteAsset": "USD",
+      "quoteAssetDigits": 2,
+      "commissions": {
+        "type": "usdPerMillionUsdVolume",
+        "value": 0,
+        "applyCommissionAutomatically": false
+      },
+      "swapLong": -8.27,
+      "swapShort": 2.92,
+      "threeDaySwaps": "wednesday",
+      "weekendSwaps": false,
+      "swapPeriods": 24,
+      "gracePeriods": 0,
+      "digits": 2,
+      "lotSize": 100,
+      "stepVolume": 1,
+      "pipPosition": 1,
+      "swapCalculationType": "pips"
+    }
+  ],
+  "positions": {
+    "columns": [
+      "id",
+      "symbol",
+      "quantity",
+      "volume",
+      "direction",
+      "entryPrice",
+      "tp",
+      "sl",
+      "commissions",
+      "closingCommissions",
+      "created",
+      "label",
+      "comment",
+      "pips",
+      "net",
+      "gross",
+      "swaps"
+    ],
+    "items": [],
+    "marginUsed": 0,
+    "freeMargin": 191.85,
+    "marginLevel": null,
+    "unrealizedNet": 0,
+    "unrealizedGross": 0
+  },
+  "orders": {
+    "columns": [
+      "id",
+      "symbol",
+      "direction",
+      "created",
+      "quantity",
+      "volume",
+      "orderType",
+      "submittedPrice",
+      "distance",
+      "tp",
+      "sl",
+      "expiryDate",
+      "currentPrice",
+      "limitRange",
+      "comment",
+      "label"
+    ],
+    "items": []
+  },
+  "history": {
+    "columns": [
+      "id",
+      "symbol",
+      "direction",
+      "net",
+      "gross",
+      "entryTime",
+      "closeTime",
+      "entryPrice",
+      "closePrice",
+      "swaps",
+      "commissions",
+      "volume",
+      "label",
+      "comment",
+      "quantity",
+      "pips",
+      "balanceDrawdownAbsolute",
+      "balanceDrawdownPercent",
+      "equityDrawdownAbsolute",
+      "equityDrawdownPercent"
+    ],
+    "items": [
+      {
+        "symbol": "XAUUSD",
+        "direction": "sell",
+        "id": 2,
+        "net": -8.15,
+        "gross": -8.15,
+        "entryTime": 1788505560000,
+        "closeTime": 1788507060000,
+        "entryPrice": 4466.22,
+        "closePrice": 4474.37,
+        "commissions": 0,
+        "swaps": 0,
+        "volume": 1,
+        "label": "SFPTrader",
+        "comment": null,
+        "balance": 191.85,
+        "quantity": 0.01,
+        "pips": -81.5,
+        "balanceDrawdownPercent": 0,
+        "equityDrawdownPercent": 3.4446607757975167,
+        "balanceDrawdownAbsolute": 0,
+        "equityDrawdownAbsolute": 6.900000000000006
+      }
+    ]
+  }
+}
