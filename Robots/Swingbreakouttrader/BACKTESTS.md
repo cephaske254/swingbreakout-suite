@@ -7,14 +7,17 @@ every parameter at its shipped default (matching the tested XAUUSD M1
 
 ## Summary
 
-| Window | Start weekday | Trades | Net | ROI | Note |
+| Window | Length | Trades | Net | ROI | Note |
 |---|---|---|---|---|---|
-| 08/09 - 11/09/2026 | Tue | 1 | +$46.22 | +23.11% | original run |
-| 31/08 - 03/09/2026 | Mon | 0 | $0.00 | 0% | |
-| 01/09 - 04/09/2026 | Tue | 1 | -$8.15 | -4.08% | see boundary anomaly below |
-| 02/09 - 05/09/2026 | Wed | 1 | -$8.15 | -4.08% | same trade as above |
-| 03/09 - 06/09/2026 | Thu | 1 | -$8.15 | -4.08% | same trade as above |
-| 04/09 - 07/09/2026 | Fri | 0 | $0.00 | 0% | |
+| 08/09 - 11/09/2026 | 3d | 1 | +$46.22 | +23.11% | original run |
+| 31/08 - 03/09/2026 | 3d | 0 | $0.00 | 0% | |
+| 01/09 - 04/09/2026 | 3d | 1 | -$8.15 | -4.08% | see boundary anomaly below |
+| 02/09 - 05/09/2026 | 3d | 1 | -$8.15 | -4.08% | same trade as above |
+| 03/09 - 06/09/2026 | 3d | 1 | -$8.15 | -4.08% | same trade as above |
+| 04/09 - 07/09/2026 | 3d | 0 | $0.00 | 0% | |
+| 15/06 - 22/06/2026 | 7d (full week) | 1 | -$11.08 | -5.54% | June |
+| 27/07 - 03/08/2026 | 7d (full week) | 0 | $0.00 | 0% | July |
+| 03/08 - 10/08/2026 | 7d (full week) | 0 | $0.00 | 0% | August |
 
 **Do not sum these as six independent samples.** Three of the five
 randomized windows (01-04/09, 02-05/09, 03-06/09) overlap and captured the
@@ -106,12 +109,53 @@ caution; the 02/09-05/09 and 03/09-06/09 results, where the trade sits
 comfortably inside the window rather than at its boundary, are less exposed
 to this specific question.
 
+## Runs 7-9: one full week per month, three different months
+
+**Methodology:** three different months (June, July, August 2026 - all
+fully completed relative to when these were run, so no future/unavailable
+data), one week randomly chosen within each month (`random.choice` over
+that month's Mondays), backtesting the **whole week** (Monday 00:00 UTC to
+the following Monday 00:00 UTC) rather than a 3-day slice, per preference -
+a full week gives the strategy's session-window and clustering filters more
+room to matter than a 3-day slice does. Same command template as the runs
+above, only the window length changes:
+
+```
+ctrader-cli backtest Swingbreakouttrader.algo \
+  --start=<dd/MM/2026> --end=<dd/MM/2026> \
+  --data-mode=m1 --balance=200 \
+  --account=<demo account> --symbol=XAUUSD --period=m1 \
+  --report-json=<path>
+```
+
+Raw reports:
+[`June: 15/06-22/06`](backtests/XAUUSD-m1_week_2026-06-15_to_2026-06-22.json) ·
+[`July: 27/07-03/08`](backtests/XAUUSD-m1_week_2026-07-27_to_2026-08-03.json) ·
+[`August: 03/08-10/08`](backtests/XAUUSD-m1_week_2026-08-03_to_2026-08-10.json)
+
+| Month | Window | Trades | Net | ROI | Trade detail |
+|---|---|---|---|---|---|
+| June | 15/06 - 22/06 | 1 | -$11.08 | -5.54% | Sell 0.01 lot, entry 4322.25 @ 2026-06-17 08:53 UTC, close 4333.33 @ 09:27 UTC |
+| July | 27/07 - 03/08 | 0 | $0.00 | 0% | - |
+| August | 03/08 - 10/08 | 0 | $0.00 | 0% | - |
+
+Two of the three full-week windows produced zero trades, and the one that
+did was a loss - across all 9 runs logged in this file (6 shorter windows +
+these 3 full weeks), the strategy has now produced 5 losing/flat outcomes
+against 1 win. That is a small, informal sample across scattered dates, not
+a rigorous walk-forward test (no fixed cadence, no out-of-sample split), but
+it's worth being direct about: nothing here yet supports the strategy having
+a demonstrated edge, and the one clearly profitable run (the original,
+08/09-11/09) looks more like an outlier than a baseline once more weeks are
+added.
+
 ## Caveats that apply to every run above
 
-- **Tiny sample size.** Six 3-day windows (several overlapping) produced 4
-  distinct trade outcomes total. This demonstrates the pipeline executes
-  correctly end-to-end across different weeks/dates, not that the strategy
-  has a demonstrated edge - that needs a backtest across many weeks/months
+- **Tiny sample size.** Nine backtest windows (several 3-day windows
+  overlapping) produced 6 distinct trade outcomes total, spanning three
+  months. This demonstrates the pipeline executes correctly end-to-end
+  across different weeks/dates, not that the strategy has a demonstrated
+  edge - that needs a backtest across many weeks/months
   and multiple symbols, per the class header's own disclaimer.
 - **Zero spread and commission.** None of these runs overrode `--spread` or
   `--commission`, so cTrader's backtest defaults (0/0) applied throughout -

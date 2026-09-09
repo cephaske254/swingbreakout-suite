@@ -56,14 +56,16 @@ See [`Indicators/SwingBreakoutSFPSignal/STRATEGY.md`](Indicators/SwingBreakoutSF
 
 Tested on **XAUUSD** with the robot's **default parameters** (matching the
 tested XAUUSD M1 `.cbotset`), via `ctrader-cli backtest`, M1, $200 starting
-balance: one 3-day run (08/09/2026-11/09/2026, +23.11% ROI, 1 trade) plus
-five more 3-day windows randomized within a single week (31/08-06/09/2026).
-See [`Robots/Swingbreakouttrader/BACKTESTS.md`](Robots/Swingbreakouttrader/BACKTESTS.md)
+balance: one 3-day run (08/09/2026-11/09/2026, +23.11% ROI, 1 trade), five
+more 3-day windows randomized within a single week (31/08-06/09/2026), and
+three full-week runs, one per month across June-August 2026. See
+[`Robots/Swingbreakouttrader/BACKTESTS.md`](Robots/Swingbreakouttrader/BACKTESTS.md)
 for the full write-up, method, and caveats — including three overlapping
-windows that captured the same trade (not independent samples) and an
-observed backtest-boundary anomaly — read those caveats before treating any
-of this as validation of an edge. Raw report JSON for all six runs is
-attached under
+windows that captured the same trade (not independent samples), an observed
+backtest-boundary anomaly, and a direct statement that the aggregate across
+all 9 runs currently leans losing/flat rather than showing a demonstrated
+edge — read those caveats before treating any of this as validation. Raw
+report JSON for all nine runs is attached under
 [`Robots/Swingbreakouttrader/backtests/`](Robots/Swingbreakouttrader/backtests/).
 
 ## Disclaimer
