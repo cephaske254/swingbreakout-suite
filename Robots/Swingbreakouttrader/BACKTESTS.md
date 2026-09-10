@@ -2,22 +2,33 @@
 
 All runs use `ctrader-cli backtest` against the compiled `Swingbreakouttrader.algo`
 (bundling its `SwingBreakoutSFPSignal` indicator dependency), XAUUSD, M1,
-every parameter at its shipped default (matching the tested XAUUSD M1
-`.cbotset`), $200 starting balance, on a demo account.
+every parameter at its shipped default, $200 starting balance, on a demo
+account.
+
+**Defaults changed on 2026-09-11.** The tested XAUUSD M1 `.cbotset` was
+updated (`TrendTimeFrame` m5→m1, `MinRiskAmount` 5→6, `BreakevenTriggerRR`
+0.25→0.5, `TradeAllSessions` false→true, plus the new `EnableTrading`
+parameter defaulting true) and the shipped defaults were re-synced to match.
+**Runs 1-9 below all predate that change** and were run under the prior
+default set (session window restricted to 07:00-20:00 UTC, tighter
+breakeven trigger, no `EnableTrading` parameter yet) - they are not directly
+comparable to "Run 1b" onward, which reflects the current defaults. Each
+run's own section says which default set it used.
 
 ## Summary
 
-| Window | Length | Trades | Net | ROI | Note |
-|---|---|---|---|---|---|
-| 08/09 - 11/09/2026 | 3d | 1 | +$46.22 | +23.11% | original run |
-| 31/08 - 03/09/2026 | 3d | 0 | $0.00 | 0% | |
-| 01/09 - 04/09/2026 | 3d | 1 | -$8.15 | -4.08% | see boundary anomaly below |
-| 02/09 - 05/09/2026 | 3d | 1 | -$8.15 | -4.08% | same trade as above |
-| 03/09 - 06/09/2026 | 3d | 1 | -$8.15 | -4.08% | same trade as above |
-| 04/09 - 07/09/2026 | 3d | 0 | $0.00 | 0% | |
-| 15/06 - 22/06/2026 | 7d (full week) | 1 | -$11.08 | -5.54% | June |
-| 27/07 - 03/08/2026 | 7d (full week) | 0 | $0.00 | 0% | July |
-| 03/08 - 10/08/2026 | 7d (full week) | 0 | $0.00 | 0% | August |
+| Window | Length | Trades | Net | ROI | Defaults | Note |
+|---|---|---|---|---|---|---|
+| 08/09 - 11/09/2026 | 3d | 1 | +$46.22 | +23.11% | prior | original run |
+| 31/08 - 03/09/2026 | 3d | 0 | $0.00 | 0% | prior | |
+| 01/09 - 04/09/2026 | 3d | 1 | -$8.15 | -4.08% | prior | see boundary anomaly below |
+| 02/09 - 05/09/2026 | 3d | 1 | -$8.15 | -4.08% | prior | same trade as above |
+| 03/09 - 06/09/2026 | 3d | 1 | -$8.15 | -4.08% | prior | same trade as above |
+| 04/09 - 07/09/2026 | 3d | 0 | $0.00 | 0% | prior | |
+| 15/06 - 22/06/2026 | 7d (full week) | 1 | -$11.08 | -5.54% | prior | June |
+| 27/07 - 03/08/2026 | 7d (full week) | 0 | $0.00 | 0% | prior | July |
+| 03/08 - 10/08/2026 | 7d (full week) | 0 | $0.00 | 0% | prior | August |
+| 08/09 - 11/09/2026 (redo) | 3d | 2 | +$46.22 | +23.11% | **current** | Run 1b, see below |
 
 **Do not sum these as six independent samples.** Three of the five
 randomized windows (01-04/09, 02-05/09, 03-06/09) overlap and captured the
@@ -28,7 +39,7 @@ Treated correctly, this is really only 4 distinct trade outcomes (1 win,
 statistical conclusion, consistent with the single-trade caveat from the
 first run.
 
-## Run 1: 08/09/2026 - 11/09/2026 (3 days)
+## Run 1: 08/09/2026 - 11/09/2026 (3 days) - prior defaults
 
 Raw report: [`backtests/XAUUSD-m1_2026-09-08_to_2026-09-11.json`](backtests/XAUUSD-m1_2026-09-08_to_2026-09-11.json).
 
@@ -53,6 +64,43 @@ ctrader-cli backtest Swingbreakouttrader.algo \
 | Win rate | 100% (1/1) |
 | Trade | Sell 0.01 lot XAUUSD, entry 4386.32 @ 2026-09-10 11:29 UTC, close 4340.10 @ 2026-09-10 12:35 UTC, net +$46.22 |
 | Simulated spread / commission | 0 / 0 (backtest defaults - not overridden) |
+
+## Run 1b: 08/09/2026 - 11/09/2026 (3 days) - redo with current defaults
+
+Same window as Run 1, re-run after the 2026-09-11 default sync (see the
+note at the top of this file). Key differences from Run 1's defaults:
+`TradeAllSessions=true` (was `false`, session window no longer restricts
+entries to 07:00-20:00 UTC), `BreakevenTriggerRR=0.5` (was `0.25`),
+`MinRiskAmount=6` (was `5`), `TrendTimeFrame=Minute` (was `Minute5`), plus
+the new `EnableTrading=true` parameter (no behavior change at its default).
+
+Raw report: [`backtests/XAUUSD-m1_2026-09-08_to_2026-09-11_v2.json`](backtests/XAUUSD-m1_2026-09-08_to_2026-09-11_v2.json).
+
+**Command:** identical to Run 1's, just against the rebuilt `.algo`.
+
+**Result:**
+
+| | |
+|---|---|
+| Starting balance | $200.00 |
+| Ending balance | $246.22 |
+| Net profit | +$46.22 |
+| ROI | +23.11% |
+| Total trades | 2 (1 short, 1 long) |
+| Win rate | 100% (2/2) - the second trade closed flat, not a real profit |
+| Trade 1 | Sell 0.01 lot, entry 4386.32 @ 2026-09-10 11:29 UTC, close 4340.10 @ 12:35 UTC, net +$46.22 - identical to Run 1's only trade |
+| Trade 2 | Buy 0.01 lot, entry 4324.89 @ 2026-09-11 01:24 UTC, close 4324.89 @ 01:41 UTC, net $0.00 |
+| Simulated spread / commission | 0 / 0 (backtest defaults - not overridden) |
+
+Trade 2 only exists because of the defaults change: it entered at 01:24 UTC,
+outside the old 07:00-20:00 UTC session window, so `TradeAllSessions=true`
+is what let it through. It closed at breakeven almost immediately - most
+likely the `BreakevenTriggerRR=0.5` stop-move firing and then price
+reversing right back through the moved stop, which reads as a demonstration
+that the wider `TradeAllSessions` setting can admit low-quality, out-of-hours
+signals that a session filter would otherwise have screened out - net
+contribution here is exactly $0, not a genuine second win, despite showing
+as "winning" in the trade-count field.
 
 ## Runs 2-6: five randomized 3-day windows within one week
 
