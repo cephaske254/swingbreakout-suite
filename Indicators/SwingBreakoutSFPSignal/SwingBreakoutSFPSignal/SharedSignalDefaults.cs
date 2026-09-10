@@ -21,7 +21,7 @@ namespace cAlgo
         public const bool TrackPriorSwing = true;
         public const bool TrackPDHPDL = true;
         public const bool TrackHcomLcom = true;
-        public const string TrendTimeFrame = "Minute5";
+        public const string TrendTimeFrame = "Minute";
         public const bool RequireTrendFilter = true;
         public const int AtrPeriod = 5;
         public const double MinSweepDepthATRmult = 0.10;

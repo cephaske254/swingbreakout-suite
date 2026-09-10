@@ -166,7 +166,7 @@ namespace cAlgo
         [Parameter("Volume (lots)", DefaultValue = 0.01, MinValue = 0.01, Step = 0.01, Group = "Risk")]
         public double VolumeInLots { get; set; }
 
-        [Parameter("Min. risk per trade, account currency (0 = off)", DefaultValue = 5.0, MinValue = 0.0, Step = 0.5, Group = "Risk")]
+        [Parameter("Min. risk per trade, account currency (0 = off)", DefaultValue = 6.0, MinValue = 0.0, Step = 0.5, Group = "Risk")]
         public double MinRiskAmount { get; set; }
 
         [Parameter("Max. risk per trade, account currency (0 = off)", DefaultValue = 15.0, MinValue = 0.0, Step = 1.0, Group = "Risk")]
@@ -182,7 +182,7 @@ namespace cAlgo
         [Parameter("Move stop to breakeven", DefaultValue = true, Group = "Risk")]
         public bool MoveToBreakeven { get; set; }
 
-        [Parameter("Breakeven Trigger (x original risk / R)", DefaultValue = 0.25, MinValue = 0.1, Step = 0.1, Group = "Risk")]
+        [Parameter("Breakeven Trigger (x original risk / R)", DefaultValue = 0.5, MinValue = 0.1, Step = 0.1, Group = "Risk")]
         public double BreakevenTriggerRR { get; set; }
 
         [Parameter("Use trailing stop (replaces the fixed TP once active)", DefaultValue = false, Group = "Risk")]
@@ -199,7 +199,7 @@ namespace cAlgo
         public double ClusterDistanceATRmult { get; set; }
 
         // === Trading session ====================================================
-        [Parameter("Trade all sessions (ignore the window below)", DefaultValue = false, Group = "Session")]
+        [Parameter("Trade all sessions (ignore the window below)", DefaultValue = true, Group = "Session")]
         public bool TradeAllSessions { get; set; }
 
         [Parameter("Session Start Hour (UTC)", DefaultValue = 7, MinValue = 0, MaxValue = 23, Group = "Session")]
