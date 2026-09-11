@@ -121,8 +121,10 @@ namespace cAlgo
         public StopLossMode StopMode { get; set; }
         // === End of shared config ==============================================
 
-        // === Confidence Dots - visual only, NOT part of shared config/====
-        // === GetIndicator<T>(...) - the Robot doesn't read these.      ====
+        // === Confidence Dots - NOT part of shared config/GetIndicator<T>(). ===
+        // The robot can consume the green/red dot outputs when its own
+        // Enable Confidence Mode setting is on. The display setting below
+        // affects chart icons only, never the output values.
         // Buyer/seller control, classified from lower-timeframe intrabar
         // candle direction (same technique as the standalone
         // BuyerSellerControlDots indicator), plotted as a dot at confirmed
@@ -211,6 +213,18 @@ namespace cAlgo
         [Output("Target Level", LineColor = "Transparent")]
         public IndicatorDataSeries TargetLevel { get; set; }
 
+        [Output("Confidence Buy", LineColor = "Transparent")]
+        public IndicatorDataSeries ConfidenceBuySignal { get; set; }
+
+        [Output("Confidence Sell", LineColor = "Transparent")]
+        public IndicatorDataSeries ConfidenceSellSignal { get; set; }
+
+        [Output("Confidence Stop", LineColor = "Transparent")]
+        public IndicatorDataSeries ConfidenceStopAnchor { get; set; }
+
+        [Output("Confidence Target", LineColor = "Transparent")]
+        public IndicatorDataSeries ConfidenceTargetLevel { get; set; }
+
         private AverageTrueRange _atr;
         // Trend filter SMAs - deliberately computed on the HIGHER
         // timeframe's own bars (_htfBars), not the chart's, so "trend" is
@@ -284,14 +298,14 @@ namespace cAlgo
             _lastSwingHighSeries = CreateDataSeries();
             _lastSwingLowSeries = CreateDataSeries();
             _lastSwingHighBarSeries = CreateDataSeries();
+            _lastSwingLowBarSeries = CreateDataSeries();
+            _swingHighBrokenSeries = CreateDataSeries();
+            _swingLowBrokenSeries = CreateDataSeries();
+
             _consolActive = CreateDataSeries();
             _consolRunStart = CreateDataSeries();
             _consolRunHigh = CreateDataSeries();
             _consolRunLow = CreateDataSeries();
-
-            _lastSwingLowBarSeries = CreateDataSeries();
-            _swingHighBrokenSeries = CreateDataSeries();
-            _swingLowBrokenSeries = CreateDataSeries();
 
             for (int i = 0; i < 2; i++)
             {
@@ -318,6 +332,10 @@ namespace cAlgo
             BearishSignal[index] = 0;
             StopAnchor[index] = double.NaN;
             TargetLevel[index] = double.NaN;
+            ConfidenceBuySignal[index] = 0;
+            ConfidenceSellSignal[index] = 0;
+            ConfidenceStopAnchor[index] = double.NaN;
+            ConfidenceTargetLevel[index] = double.NaN;
 
             double lastSwingHigh = index > 0 ? _lastSwingHighSeries[index - 1] : double.NaN;
             double lastSwingLow = index > 0 ? _lastSwingLowSeries[index - 1] : double.NaN;
@@ -433,18 +451,15 @@ namespace cAlgo
 
             if (BearishSignal[index] > 0.5)
                 Chart.DrawIcon("SFPBear" + index, ChartIconType.Circle, index, barHigh + atrVal * 0.3, BearColor);
+            if (BullishSignal[index] > 0.5)
+                Chart.DrawIcon("SFPBull" + index, ChartIconType.Circle, index, barLow - atrVal * 0.3, BullColor);
+
+            UpdateConfidenceDots(index);
+
             // === Consolidation Highlight - purely visual, independent of ==
             // === the signal/stop/target outputs above. ====================
             if (HighlightConsolidation)
                 UpdateConsolidationHighlight(index, atrVal);
-
-            if (BullishSignal[index] > 0.5)
-                Chart.DrawIcon("SFPBull" + index, ChartIconType.Circle, index, barLow - atrVal * 0.3, BullColor);
-
-            // === Confidence Dots - purely visual, independent of the ===
-            // === signal/stop/target outputs above. =====================
-            if (ShowConfidenceDots)
-                UpdateConfidenceDots(index);
         }
 
         // Single pending-break tracker for `dir` (bullish=1, bearish=-1).
@@ -822,6 +837,9 @@ namespace cAlgo
                 if (i == centerIndex) continue;
                 if (Bars.LowPrices[i] <= centerLow) return false;
             }
+            return true;
+        }
+
         // =====================================================================
         // Consolidation Highlight - shades a translucent rectangle over any
         // run of bars whose rolling ConsolidationLookbackBars-bar high/low
@@ -891,9 +909,6 @@ namespace cAlgo
             _consolRunLow[index] = isConsolidating ? runLow : double.NaN;
         }
 
-            return true;
-        }
-
         // =====================================================================
         // Confidence Dots - buyer/seller control classification, ported from
         // the standalone BuyerSellerControlDots indicator, then anchored to
@@ -960,18 +975,51 @@ namespace cAlgo
                     else
                         dotColor = Color.FromArgb(alpha, 255, 179, 0);    // #FFB300 amber
 
-                    double atrAtPivot = _atr.Result[candidate];
-                    double offset = atrAtPivot * ConfidenceDotOffsetATRmult;
-                    double dotY = isPivotHigh ? Bars.HighPrices[candidate] + offset : Bars.LowPrices[candidate] - offset;
+                    SetConfidenceTradeSignal(index, candidate, code);
 
-                    string dotName = "conf" + iconType + "Dot_" + candidate;
-                    Chart.DrawIcon(dotName, iconType, Bars.OpenTimes[candidate], dotY, dotColor);
+                    if (ShowConfidenceDots)
+                    {
+                        double atrAtPivot = _atr.Result[candidate];
+                        double offset = atrAtPivot * ConfidenceDotOffsetATRmult;
+                        double dotY = isPivotHigh ? Bars.HighPrices[candidate] + offset : Bars.LowPrices[candidate] - offset;
+
+                        string dotName = "conf" + iconType + "Dot_" + candidate;
+                        Chart.DrawIcon(dotName, iconType, Bars.OpenTimes[candidate], dotY, dotColor);
+                    }
 
                     lastDotCode = code;
                 }
             }
 
             lastDotCodeSeries[index] = lastDotCode;
+        }
+
+        // A dot is only actionable once its pivot has been confirmed. Its
+        // stop spans the entire pivot-to-confirmation window; target is 2R.
+        private void SetConfidenceTradeSignal(int index, int pivotIndex, int code)
+        {
+            double entry = Bars.ClosePrices[index];
+            double low = double.PositiveInfinity;
+            double high = double.NegativeInfinity;
+
+            for (int i = pivotIndex; i <= index; i++)
+            {
+                low = Math.Min(low, Bars.LowPrices[i]);
+                high = Math.Max(high, Bars.HighPrices[i]);
+            }
+
+            if (code == 1 && low < entry)
+            {
+                ConfidenceBuySignal[index] = 1;
+                ConfidenceStopAnchor[index] = low;
+                ConfidenceTargetLevel[index] = entry + (entry - low) * 2.0;
+            }
+            else if (code == -1 && high > entry)
+            {
+                ConfidenceSellSignal[index] = 1;
+                ConfidenceStopAnchor[index] = high;
+                ConfidenceTargetLevel[index] = entry - (high - entry) * 2.0;
+            }
         }
 
         // Aggregate buy% across bars fromIndex..toIndex inclusive (summing

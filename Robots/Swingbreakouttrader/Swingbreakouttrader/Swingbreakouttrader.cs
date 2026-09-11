@@ -50,12 +50,12 @@ namespace cAlgo
     // SwingBreakoutSFPSignal.cs's header for the full setup notes and a
     // fallback plan if you hit a CT0003 "single algo type" build error.
     //
-    // ENTRY: the only entry trigger is a signal from the indicator
+    // ENTRY: the standard entry trigger is a signal from the indicator
     // (BullishSignal/BearishSignal on the just-closed bar) - fired when
     // price touches the 50% retracement of the D-C leg in the indicator's
-    // A-B-C-D sequence (see STRATEGY.md). This Robot has no opinion on WHEN
-    // within the indicator that bit gets set, it just acts on it.
-    // OnBarClosed reads the signal and, if set, hands it straight to
+    // A-B-C-D sequence (see STRATEGY.md). Optionally, Enable Confidence Mode
+    // also trades confirmed green confidence dots as buys and red dots as
+    // sells. OnBarClosed reads the enabled signals and hands them to
     // TryEnter.
     //
     // TRADE MANAGEMENT:
@@ -157,6 +157,9 @@ namespace cAlgo
         // strands an open trade with no stop management.
         [Parameter("Enable Trading (OFF = no new entries, total override)", DefaultValue = true, Group = "Master Switch")]
         public bool EnableTrading { get; set; }
+
+        [Parameter("Enable Confidence Mode (green = buy, red = sell)", DefaultValue = false, Group = "Master Switch")]
+        public bool EnableConfidenceMode { get; set; }
 
         // === Risk / trade management ==========================================
         // Stop-loss and take-profit are both dictated by the strategy itself
@@ -280,6 +283,10 @@ namespace cAlgo
                 TryEnter(-1, index, _signal.StopAnchor[index], _signal.TargetLevel[index]);
             if (_signal.BullishSignal[index] > 0.5)
                 TryEnter(1, index, _signal.StopAnchor[index], _signal.TargetLevel[index]);
+            if (EnableConfidenceMode && _signal.ConfidenceSellSignal[index] > 0.5)
+                TryEnter(-1, index, _signal.ConfidenceStopAnchor[index], _signal.ConfidenceTargetLevel[index]);
+            if (EnableConfidenceMode && _signal.ConfidenceBuySignal[index] > 0.5)
+                TryEnter(1, index, _signal.ConfidenceStopAnchor[index], _signal.ConfidenceTargetLevel[index]);
 
             _lastProcessedIndex = index;
         }

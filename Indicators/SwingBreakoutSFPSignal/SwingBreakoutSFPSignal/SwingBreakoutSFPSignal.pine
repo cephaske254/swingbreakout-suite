@@ -1,0 +1,286 @@
+//@version=6
+indicator("Swing Breakout SFP Signal", shorttitle = "Swing SFP", overlay = true, max_labels_count = 500)
+
+// Pine Script translation of the cTrader SwingBreakoutSFPSignal indicator.
+// Signals are confirmed at bar close. Pivot-dependent features appear only
+// after their configured right-side confirmation bars have completed.
+
+groupSignal = "Signal"
+groupLevels = "Levels"
+groupConfluence = "Confluence"
+groupConfidence = "Confidence Dots"
+groupConsolidation = "Consolidation Highlight"
+
+swingLeft = input.int(5, "Swing Lookback - Left Bars", minval = 1, maxval = 50, group = groupSignal)
+swingRight = input.int(5, "Swing Lookback - Right Bars", minval = 1, maxval = 50, group = groupSignal)
+atrPeriod = input.int(5, "ATR Period", minval = 1, group = groupSignal)
+minSweepAtr = input.float(0.10, "Min. Sweep/Break Depth beyond level (x ATR)", minval = 0, step = 0.05, group = groupSignal)
+stopMode = input.string("Normal", "Stop-Loss Mode", options = ["Conservative", "Normal"], group = groupSignal)
+
+trackPriorSwing = input.bool(true, "Track Prior Swing High/Low", group = groupLevels)
+trackPDHPDL = input.bool(true, "Track Prior Day High/Low/Close", group = groupLevels)
+trackHcomLcom = input.bool(true, "Track Month-to-Date Close High/Low (HCOM/LCOM)", group = groupLevels)
+trendTimeframe = input.timeframe("1", "Higher Timeframe (for SMA trend filter)", group = groupLevels)
+
+requireTrendFilter = input.bool(true, "Require SMA trend filter (direction + separation)", group = groupConfluence)
+
+showConfidenceDots = input.bool(true, "Show Confidence Dots", group = groupConfidence)
+majorLeft = input.int(15, "Major Swing Lookback - Left Bars", minval = 1, maxval = 100, group = groupConfidence)
+majorRight = input.int(15, "Major Swing Lookback - Right Bars", minval = 1, maxval = 100, group = groupConfidence)
+
+highlightConsolidation = input.bool(true, "Highlight Consolidation", group = groupConsolidation)
+consolidationLookback = input.int(20, "Consolidation Lookback (bars)", minval = 5, maxval = 200, group = groupConsolidation)
+consolidationRangeAtr = input.float(1.5, "Consolidation Max Range (x ATR)", minval = 0.1, step = 0.1, group = groupConsolidation)
+
+f_month_high_close() =>
+    var float result = na
+    if timeframe.change("M")
+        result := close
+    else
+        result := math.max(nz(result, close), close)
+    result
+
+f_month_low_close() =>
+    var float result = na
+    if timeframe.change("M")
+        result := close
+    else
+        result := math.min(nz(result, close), close)
+    result
+
+f_window_buy_pct(length) =>
+    float buyVolume = 0.0
+    float sellVolume = 0.0
+    for i = 0 to length
+        if close[i] > open[i]
+            buyVolume += volume[i]
+        else if close[i] < open[i]
+            sellVolume += volume[i]
+        else
+            buyVolume += volume[i] / 2
+            sellVolume += volume[i] / 2
+    float total = buyVolume + sellVolume
+    total > 0 ? buyVolume / total * 100 : 50
+
+f_confidence_code(length) =>
+    buyPct = f_window_buy_pct(length)
+    buyPct >= 70 ? 1 : buyPct <= 30 ? -1 : 0
+
+atr = ta.atr(atrPeriod)
+threshold = minSweepAtr * atr
+
+// Daily values are requested independently of the chart timeframe.
+pdh = request.security(syminfo.tickerid, "D", high[1], lookahead = barmerge.lookahead_off)
+pdl = request.security(syminfo.tickerid, "D", low[1], lookahead = barmerge.lookahead_off)
+pdc = request.security(syminfo.tickerid, "D", close[1], lookahead = barmerge.lookahead_off)
+hcom = request.security(syminfo.tickerid, "D", f_month_high_close(), lookahead = barmerge.lookahead_off)
+lcom = request.security(syminfo.tickerid, "D", f_month_low_close(), lookahead = barmerge.lookahead_off)
+
+htfClose = request.security(syminfo.tickerid, trendTimeframe, close, lookahead = barmerge.lookahead_off)
+htfSma20 = request.security(syminfo.tickerid, trendTimeframe, ta.sma(close, 20), lookahead = barmerge.lookahead_off)
+htfSma200 = request.security(syminfo.tickerid, trendTimeframe, ta.sma(close, 200), lookahead = barmerge.lookahead_off)
+htfAtr = request.security(syminfo.tickerid, trendTimeframe, ta.sma(ta.tr(true), atrPeriod), lookahead = barmerge.lookahead_off)
+
+trendBuy = not requireTrendFilter or (close > htfSma200 and htfSma20 > htfSma200 and math.abs(htfSma20 - htfSma200) >= htfAtr * 0.5)
+trendSell = not requireTrendFilter or (close < htfSma200 and htfSma20 < htfSma200 and math.abs(htfSma20 - htfSma200) >= htfAtr * 0.5)
+
+// Keep only the most significant active swing until price closes through it.
+var float lastSwingHigh = na
+var float lastSwingLow = na
+var bool swingHighBroken = false
+var bool swingLowBroken = false
+
+if not na(lastSwingLow) and not swingLowBroken and close < lastSwingLow
+    swingLowBroken := true
+if not na(lastSwingHigh) and not swingHighBroken and close > lastSwingHigh
+    swingHighBroken := true
+
+pivotHigh = ta.pivothigh(high, swingLeft, swingRight)
+pivotLow = ta.pivotlow(low, swingLeft, swingRight)
+if not na(pivotHigh) and (swingHighBroken or na(lastSwingHigh) or pivotHigh > lastSwingHigh)
+    lastSwingHigh := pivotHigh
+    swingHighBroken := false
+if not na(pivotLow) and (swingLowBroken or na(lastSwingLow) or pivotLow < lastSwingLow)
+    lastSwingLow := pivotLow
+    swingLowBroken := false
+
+plot(trackPriorSwing and not swingHighBroken ? lastSwingHigh : na, "Active Swing High", color = color.new(color.red, 35), style = plot.style_linebr)
+plot(trackPriorSwing and not swingLowBroken ? lastSwingLow : na, "Active Swing Low", color = color.new(color.lime, 35), style = plot.style_linebr)
+
+bearishSfp = (trackPriorSwing and not na(lastSwingHigh) and high > lastSwingHigh and close < lastSwingHigh and high - lastSwingHigh >= threshold) or
+     (trackPDHPDL and not na(pdh) and high > pdh and close < pdh and high - pdh >= threshold) or
+     (trackPDHPDL and not na(pdc) and high > pdc and close < pdc and high - pdc >= threshold) or
+     (trackHcomLcom and not na(hcom) and high > hcom and close < hcom and high - hcom >= threshold)
+bullishSfp = (trackPriorSwing and not na(lastSwingLow) and low < lastSwingLow and close > lastSwingLow and lastSwingLow - low >= threshold) or
+     (trackPDHPDL and not na(pdl) and low < pdl and close > pdl and pdl - low >= threshold) or
+     (trackPDHPDL and not na(pdc) and low < pdc and close > pdc and pdc - low >= threshold) or
+     (trackHcomLcom and not na(lcom) and low < lcom and close > lcom and lcom - low >= threshold)
+
+// B&R has one pending level per direction, matching the cTrader indicator.
+var float bullishPendingLevel = na
+var float bearishPendingLevel = na
+bool bullishBnr = false
+bool bearishBnr = false
+
+if not na(bullishPendingLevel)
+    if low <= bullishPendingLevel and close > bullishPendingLevel
+        bullishBnr := true
+        bullishPendingLevel := na
+    else if close < bullishPendingLevel
+        bullishPendingLevel := na
+else
+    float bullishBreak = na
+    if trackPriorSwing and not na(lastSwingHigh) and close > lastSwingHigh + threshold
+        bullishBreak := lastSwingHigh
+    else if trackPDHPDL and not na(pdh) and close > pdh + threshold
+        bullishBreak := pdh
+    else if trackPDHPDL and not na(pdc) and close > pdc + threshold
+        bullishBreak := pdc
+    else if trackHcomLcom and not na(hcom) and close > hcom + threshold
+        bullishBreak := hcom
+    bullishPendingLevel := bullishBreak
+
+if not na(bearishPendingLevel)
+    if high >= bearishPendingLevel and close < bearishPendingLevel
+        bearishBnr := true
+        bearishPendingLevel := na
+    else if close > bearishPendingLevel
+        bearishPendingLevel := na
+else
+    float bearishBreak = na
+    if trackPriorSwing and not na(lastSwingLow) and close < lastSwingLow - threshold
+        bearishBreak := lastSwingLow
+    else if trackPDHPDL and not na(pdl) and close < pdl - threshold
+        bearishBreak := pdl
+    else if trackPDHPDL and not na(pdc) and close < pdc - threshold
+        bearishBreak := pdc
+    else if trackHcomLcom and not na(lcom) and close < lcom - threshold
+        bearishBreak := lcom
+    bearishPendingLevel := bearishBreak
+
+// A-B-C-D state machine: 0 idle, 1 B, 2 C, 3 extension, 4 D, 5 entry.
+var int bullState = 0
+var int bearState = 0
+var int bullPhaseStart = na
+var int bearPhaseStart = na
+var float bullA = na
+var float bullB = na
+var float bullC = na
+var float bullD = na
+var float bearA = na
+var float bearB = na
+var float bearC = na
+var float bearD = na
+bool bullishSignal = false
+bool bearishSignal = false
+float stopAnchor = na
+float targetLevel = na
+
+if bullishSfp or bullishBnr
+    bullState := 1
+    bullPhaseStart := bar_index
+    bullA := low
+    bullB := na
+    bullC := na
+    bullD := na
+else if bullState != 0
+    if bullState != 1 and close < bullA
+        bullState := 0
+    else if bullState == 1
+        bullA := math.min(bullA, low)
+        if not na(pivotHigh) and bar_index - swingRight > bullPhaseStart and pivotHigh > bullA
+            bullB := pivotHigh
+            bullState := 2
+            bullPhaseStart := bar_index - swingRight
+    else if bullState == 2
+        if not na(pivotHigh) and bar_index - swingRight > bullPhaseStart and pivotHigh > bullB
+            bullB := pivotHigh
+        if not na(pivotLow) and bar_index - swingRight > bullPhaseStart and pivotLow < bullB and pivotLow > bullA
+            bullC := pivotLow
+            bullState := 3
+            bullPhaseStart := bar_index - swingRight
+    else if bullState == 3 and close > bullC + (bullB - bullA)
+        bullState := 4
+        bullPhaseStart := bar_index
+    else if bullState == 4 and not na(pivotHigh) and bar_index - swingRight > bullPhaseStart
+        bullD := pivotHigh
+        bullState := 5
+        bullPhaseStart := bar_index - swingRight
+    else if bullState == 5 and low <= (bullD + bullC) / 2 and trendBuy
+        bullishSignal := true
+        stopAnchor := stopMode == "Conservative" ? bullC : bullA
+        targetLevel := bullC + (bullD - bullC) * 2.618
+        bullState := 0
+
+if bearishSfp or bearishBnr
+    bearState := 1
+    bearPhaseStart := bar_index
+    bearA := high
+    bearB := na
+    bearC := na
+    bearD := na
+else if bearState != 0
+    if bearState != 1 and close > bearA
+        bearState := 0
+    else if bearState == 1
+        bearA := math.max(bearA, high)
+        if not na(pivotLow) and bar_index - swingRight > bearPhaseStart and pivotLow < bearA
+            bearB := pivotLow
+            bearState := 2
+            bearPhaseStart := bar_index - swingRight
+    else if bearState == 2
+        if not na(pivotLow) and bar_index - swingRight > bearPhaseStart and pivotLow < bearB
+            bearB := pivotLow
+        if not na(pivotHigh) and bar_index - swingRight > bearPhaseStart and pivotHigh > bearB and pivotHigh < bearA
+            bearC := pivotHigh
+            bearState := 3
+            bearPhaseStart := bar_index - swingRight
+    else if bearState == 3 and close < bearC + (bearB - bearA)
+        bearState := 4
+        bearPhaseStart := bar_index
+    else if bearState == 4 and not na(pivotLow) and bar_index - swingRight > bearPhaseStart
+        bearD := pivotLow
+        bearState := 5
+        bearPhaseStart := bar_index - swingRight
+    else if bearState == 5 and high >= (bearD + bearC) / 2 and trendSell
+        bearishSignal := true
+        stopAnchor := stopMode == "Conservative" ? bearC : bearA
+        targetLevel := bearC + (bearD - bearC) * 2.618
+        bearState := 0
+
+plotshape(bullishSignal, "Bullish SFP / B&R Entry", shape.circle, location.belowbar, color.lime, size = size.small, text = "BUY")
+plotshape(bearishSignal, "Bearish SFP / B&R Entry", shape.circle, location.abovebar, color.red, size = size.small, text = "SELL")
+plot(stopAnchor, "Stop Anchor", color = color.new(color.red, 0), style = plot.style_cross, linewidth = 2)
+plot(targetLevel, "Target Level", color = color.new(color.aqua, 0), style = plot.style_cross, linewidth = 2)
+
+// Confidence dots use chart-bar volume direction. TradingView volume has no
+// true bid/ask split, so this is the closest portable equivalent to cTrader's
+// lower-timeframe tick-volume classification.
+majorHigh = ta.pivothigh(high, majorLeft, majorRight)
+majorLow = ta.pivotlow(low, majorLeft, majorRight)
+minorHigh = pivotHigh
+minorLow = pivotLow
+var int lastMajorCode = na
+var int lastMinorCode = na
+majorCode = f_confidence_code(majorRight)
+minorCode = f_confidence_code(swingRight)
+majorChanged = na(lastMajorCode) or majorCode != lastMajorCode
+minorChanged = na(lastMinorCode) or minorCode != lastMinorCode
+majorDot = showConfidenceDots and (not na(majorHigh) or not na(majorLow)) and majorCode != 0 and majorChanged
+minorDot = showConfidenceDots and (not na(minorHigh) or not na(minorLow)) and minorCode != 0 and minorChanged
+if majorDot
+    lastMajorCode := majorCode
+if minorDot
+    lastMinorCode := minorCode
+plotshape(majorDot and majorCode == 1, "Major Green Confidence", shape.star, location.belowbar, color.lime, size = size.normal, offset = -majorRight)
+plotshape(majorDot and majorCode == -1, "Major Red Confidence", shape.star, location.abovebar, color.red, size = size.normal, offset = -majorRight)
+plotshape(minorDot and minorCode == 1, "Minor Green Confidence", shape.circle, location.belowbar, color.lime, size = size.tiny, offset = -swingRight)
+plotshape(minorDot and minorCode == -1, "Minor Red Confidence", shape.circle, location.abovebar, color.red, size = size.tiny, offset = -swingRight)
+
+consolidating = bar_index >= consolidationLookback - 1 and ta.highest(high, consolidationLookback) - ta.lowest(low, consolidationLookback) <= consolidationRangeAtr * atr
+bgcolor(highlightConsolidation and consolidating ? color.new(color.rgb(255, 193, 7), 82) : na, title = "Consolidation")
+
+alertcondition(bullishSignal, "Bullish SFP / B&R Entry", "Bullish SFP / B&R entry on {{ticker}}")
+alertcondition(bearishSignal, "Bearish SFP / B&R Entry", "Bearish SFP / B&R entry on {{ticker}}")
+alertcondition((majorDot and majorCode == 1) or (minorDot and minorCode == 1), "Green Confidence Dot", "Green confidence dot on {{ticker}}")
+alertcondition((majorDot and majorCode == -1) or (minorDot and minorCode == -1), "Red Confidence Dot", "Red confidence dot on {{ticker}}")

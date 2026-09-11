@@ -14,7 +14,10 @@ sequence, split into a pure signal indicator and an execution robot:
   indicator via `Indicators.GetIndicator<SwingBreakoutSFPSignal>(...)` and
   handles only trade management: sizing, stop/target placement (taken
   as-is from the indicator), breakeven, trailing stop, and entry-side
-  filters (spread, session, clustering, opposite-direction blocking).
+  filters (spread, session, clustering, opposite-direction blocking). Its
+  opt-in **Enable Confidence Mode** treats a confirmed green confidence dot
+  as a buy signal and a red dot as a sell signal; dot entries use the
+  pivot-to-confirmation range as their stop and a 2R target.
 
 ## Build
 
