@@ -277,7 +277,9 @@ plotshape(majorDot and majorCode == -1, "Major Red Confidence", shape.diamond, l
 plotshape(minorDot and minorCode == 1, "Minor Green Confidence", shape.circle, location.belowbar, color.lime, size = size.tiny, offset = -swingRight)
 plotshape(minorDot and minorCode == -1, "Minor Red Confidence", shape.circle, location.abovebar, color.red, size = size.tiny, offset = -swingRight)
 
-consolidating = bar_index >= consolidationLookback - 1 and ta.highest(high, consolidationLookback) - ta.lowest(low, consolidationLookback) <= consolidationRangeAtr * atr
+consolidationHigh = ta.highest(high, consolidationLookback)
+consolidationLow = ta.lowest(low, consolidationLookback)
+consolidating = bar_index >= consolidationLookback - 1 and consolidationHigh - consolidationLow <= consolidationRangeAtr * atr
 bgcolor(highlightConsolidation and consolidating ? color.new(color.rgb(255, 193, 7), 82) : na, title = "Consolidation")
 
 alertcondition(bullishSignal, "Bullish SFP / B&R Entry", "Bullish SFP / B&R entry on {{ticker}}")
