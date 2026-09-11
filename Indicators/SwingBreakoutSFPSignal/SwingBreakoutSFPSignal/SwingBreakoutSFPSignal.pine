@@ -29,8 +29,9 @@ majorLeft = input.int(15, "Major Swing Lookback - Left Bars", minval = 1, maxval
 majorRight = input.int(15, "Major Swing Lookback - Right Bars", minval = 1, maxval = 100, group = groupConfidence)
 
 highlightConsolidation = input.bool(true, "Highlight Consolidation", group = groupConsolidation)
-consolidationLookback = input.int(20, "Consolidation Lookback (bars)", minval = 5, maxval = 200, group = groupConsolidation)
-consolidationRangeAtr = input.float(4.0, "Consolidation Max Range (x ATR)", minval = 0.1, step = 0.1, group = groupConsolidation)
+consolidationAdxPeriod = input.int(14, "Consolidation ADX Period", minval = 2, group = groupConsolidation)
+consolidationMaxAdx = input.float(17.0, "Consolidation Max ADX", minval = 1.0, step = 1.0, group = groupConsolidation)
+consolidationMinBars = input.int(15, "Consolidation Min. Bars", minval = 2, group = groupConsolidation)
 
 f_month_high_close() =>
     var float result = na
@@ -282,13 +283,29 @@ if minorDot
     minorY = not na(minorHigh) ? high[swingRight] + atr[swingRight] * 0.5 : low[swingRight] - atr[swingRight] * 0.5
     label.new(bar_index - swingRight, minorY, "", style = label.style_circle, size = size.tiny, color = minorDotColor, tooltip = "Confidence: " + str.tostring(math.round(minorBuyPct)) + "%")
 
-consolidationHigh = ta.highest(high, consolidationLookback)
-consolidationLow = ta.lowest(low, consolidationLookback)
-consolidationRange = consolidationHigh - consolidationLow
-consolidationNetMove = math.abs(close - close[consolidationLookback - 1])
-consolidationEfficiency = consolidationRange > 0 ? consolidationNetMove / consolidationRange : 0
-consolidating = bar_index >= consolidationLookback - 1 and consolidationRange <= consolidationRangeAtr * atr and consolidationEfficiency <= 0.35
-bgcolor(highlightConsolidation and consolidating ? color.new(color.rgb(255, 193, 7), 82) : na, title = "Consolidation")
+[_, _, consolidationAdx] = ta.dmi(consolidationAdxPeriod, consolidationAdxPeriod)
+lowAdx = consolidationAdx < consolidationMaxAdx
+var int consolidationStart = na
+var float consolidationHigh = na
+var float consolidationLow = na
+if lowAdx
+    if not nz(lowAdx[1], false)
+        consolidationStart := bar_index
+        consolidationHigh := high
+        consolidationLow := low
+    else
+        consolidationHigh := math.max(consolidationHigh, high)
+        consolidationLow := math.min(consolidationLow, low)
+else
+    consolidationStart := na
+    consolidationHigh := na
+    consolidationLow := na
+consolidating = lowAdx and not na(consolidationStart) and bar_index - consolidationStart + 1 >= consolidationMinBars
+consolidationMid = (consolidationHigh + consolidationLow) / 2
+consolidationTop = plot(highlightConsolidation and consolidating ? consolidationHigh : na, "Consolidation Top", color = color.new(color.orange, 25), style = plot.style_linebr)
+consolidationBottom = plot(highlightConsolidation and consolidating ? consolidationLow : na, "Consolidation Bottom", color = color.new(color.lime, 25), style = plot.style_linebr)
+consolidationMidPlot = plot(highlightConsolidation and consolidating ? consolidationMid : na, "Consolidation Mid", color = color.new(color.gray, 45), style = plot.style_linebr)
+fill(consolidationTop, consolidationBottom, color = color.new(color.orange, 88), title = "Consolidation Range")
 
 alertcondition(bullishSignal, "Bullish SFP / B&R Entry", "Bullish SFP / B&R entry on {{ticker}}")
 alertcondition(bearishSignal, "Bearish SFP / B&R Entry", "Bearish SFP / B&R entry on {{ticker}}")

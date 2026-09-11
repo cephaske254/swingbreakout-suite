@@ -129,17 +129,14 @@ available volume data differs.
 ## Consolidation filter
 
 The cTrader robot always blocks new entries while the indicator marks a
-consolidation. A consolidation requires both of the following across the
-last `Consolidation Lookback` bars (20 by default):
+consolidation. A consolidation begins when ADX is below `Consolidation Max
+ADX` (17 by default) and becomes active only after `Consolidation Min. Bars`
+(15 by default) remain below that threshold.
 
-- The high-low range is no more than `Consolidation Max Range` × ATR (4.0 by
-  default).
-- The absolute move from the first close to the latest close uses no more
-  than 35% of that range.
-
-The first condition detects compression; the second excludes a narrow but
-steadily directional move. The Pine indicator uses the same visual
-classification but, as an indicator, does not place or block trades.
+While ADX remains below the threshold, the indicator tracks and displays the
+range high, low, and midpoint. A rise back above the threshold clears the
+range. The Pine indicator uses the same visual classification but, as an
+indicator, does not place or block trades.
 
 ## Parameter defaults
 

@@ -150,16 +150,19 @@ namespace cAlgo
 
         // === Consolidation detection is execution-relevant but not shared ===
         // === via GetIndicator<T>(); the Robot reads its output directly.  ===
-        // A range is consolidated when its rolling high-low span is compact
-        // relative to ATR and its net movement uses little of that span.
+        // A range is consolidated after ADX stays below its threshold for a
+        // minimum duration. Its high/low bounds are tracked for chart review.
         [Parameter("Highlight Consolidation (visual only)", DefaultValue = true, Group = "Consolidation Highlight")]
         public bool HighlightConsolidation { get; set; }
 
-        [Parameter("Consolidation Lookback (bars)", DefaultValue = 20, MinValue = 5, MaxValue = 200, Group = "Consolidation Highlight")]
-        public int ConsolidationLookbackBars { get; set; }
+        [Parameter("Consolidation ADX Period", DefaultValue = 14, MinValue = 2, Group = "Consolidation Highlight")]
+        public int ConsolidationAdxPeriod { get; set; }
 
-        [Parameter("Consolidation Max Range (x ATR)", DefaultValue = 4.0, MinValue = 0.1, Step = 0.1, Group = "Consolidation Highlight")]
-        public double ConsolidationRangeATRmult { get; set; }
+        [Parameter("Consolidation Max ADX", DefaultValue = 17.0, MinValue = 1.0, Step = 1.0, Group = "Consolidation Highlight")]
+        public double ConsolidationMaxAdx { get; set; }
+
+        [Parameter("Consolidation Min. Bars", DefaultValue = 15, MinValue = 2, Group = "Consolidation Highlight")]
+        public int ConsolidationMinBars { get; set; }
         // === End of Consolidation Highlight ======================================
 
         // Internal-only tuning, not shared with the bot - edit directly for
@@ -168,7 +171,6 @@ namespace cAlgo
         // the chart's own _atr, since the SMAs it measures the separation
         // of live on that longer horizon too.
         private const double TrendSeparationATRmult = 0.5;
-        private const double ConsolidationMaxDirectionalEfficiency = 0.35;
 
         // 261.8% extension ratio used for TargetLevel - see STRATEGY.md.
         private const double TargetExtensionRatio = 2.618;
@@ -221,6 +223,7 @@ namespace cAlgo
         public IndicatorDataSeries ConsolidationActive { get; set; }
 
         private AverageTrueRange _atr;
+        private DirectionalMovementSystem _consolidationDms;
         // Trend filter SMAs - deliberately computed on the HIGHER
         // timeframe's own bars (_htfBars), not the chart's, so "trend" is
         // measured on the same horizon as the structure being swept.
@@ -245,6 +248,7 @@ namespace cAlgo
         // carry the running high/low of the CURRENT active run so extending
         // it stays O(1) per bar instead of rescanning the whole run.
         private IndicatorDataSeries _consolActive;
+        private IndicatorDataSeries _consolCandidate;
         private IndicatorDataSeries _consolRunStart;
         private IndicatorDataSeries _consolRunHigh;
         private IndicatorDataSeries _consolRunLow;
@@ -293,6 +297,7 @@ namespace cAlgo
         protected override void Initialize()
         {
             _atr = Indicators.AverageTrueRange(AtrPeriod, MovingAverageType.WilderSmoothing);
+            _consolidationDms = Indicators.DirectionalMovementSystem(ConsolidationAdxPeriod);
             _dailyBars = MarketData.GetBars(TimeFrame.Daily);
             _htfBars = MarketData.GetBars(TrendTimeFrame);
             // Must come after _htfBars is assigned above - these read its ClosePrices.
@@ -307,6 +312,7 @@ namespace cAlgo
             _swingLowBrokenSeries = CreateDataSeries();
 
             _consolActive = CreateDataSeries();
+            _consolCandidate = CreateDataSeries();
             _consolRunStart = CreateDataSeries();
             _consolRunHigh = CreateDataSeries();
             _consolRunLow = CreateDataSeries();
@@ -463,7 +469,7 @@ namespace cAlgo
 
             UpdateConfidenceDots(index);
 
-            UpdateConsolidationState(index, atrVal);
+            UpdateConsolidationState(index);
         }
 
         // Single pending-break tracker for `dir` (bullish=1, bearish=-1).
@@ -845,53 +851,35 @@ namespace cAlgo
         }
 
         // =====================================================================
-        // Consolidation detection evaluates every bar against a fresh rolling
-        // window. The range threshold finds compression; the directional
-        // efficiency threshold excludes a steady, narrow trend.
+        // ADX identifies the low-trend regime. A candidate becomes active only
+        // once it survives ConsolidationMinBars bars, filtering brief dips.
         // =====================================================================
 
-        private void UpdateConsolidationState(int index, double atrVal)
+        private void UpdateConsolidationState(int index)
         {
-            bool prevActive = index > 0 && _consolActive[index - 1] > 0.5;
+            bool wasCandidate = index > 0 && _consolCandidate[index - 1] > 0.5;
             double runStart = index > 0 ? _consolRunStart[index - 1] : double.NaN;
             double runHigh = index > 0 ? _consolRunHigh[index - 1] : double.NaN;
             double runLow = index > 0 ? _consolRunLow[index - 1] : double.NaN;
+            double adx = _consolidationDms.ADX[index];
+            bool isCandidate = !double.IsNaN(adx) && adx < ConsolidationMaxAdx;
 
-            bool isConsolidating = false;
-
-            if (index >= ConsolidationLookbackBars - 1 && !double.IsNaN(atrVal) && atrVal > 0)
+            if (isCandidate)
             {
-                double rollingHigh = double.NegativeInfinity;
-                double rollingLow = double.PositiveInfinity;
-                int windowStart = index - ConsolidationLookbackBars + 1;
-                for (int i = windowStart; i <= index; i++)
+                if (!wasCandidate)
                 {
-                    rollingHigh = Math.Max(rollingHigh, Bars.HighPrices[i]);
-                    rollingLow = Math.Min(rollingLow, Bars.LowPrices[i]);
+                    runStart = index;
+                    runHigh = Bars.HighPrices[index];
+                    runLow = Bars.LowPrices[index];
                 }
-
-                double range = rollingHigh - rollingLow;
-                double netMove = Math.Abs(Bars.ClosePrices[index] - Bars.ClosePrices[windowStart]);
-                double directionalEfficiency = range > 0 ? netMove / range : 0;
-                isConsolidating = range <= ConsolidationRangeATRmult * atrVal
-                    && directionalEfficiency <= ConsolidationMaxDirectionalEfficiency;
-
-                if (isConsolidating)
+                else
                 {
-                    if (!prevActive)
-                    {
-                        runStart = windowStart;
-                        runHigh = rollingHigh;
-                        runLow = rollingLow;
-                    }
-                    else
-                    {
-                        runHigh = Math.Max(runHigh, rollingHigh);
-                        runLow = Math.Min(runLow, rollingLow);
-                    }
+                    runHigh = Math.Max(runHigh, Bars.HighPrices[index]);
+                    runLow = Math.Min(runLow, Bars.LowPrices[index]);
                 }
             }
 
+            bool isConsolidating = isCandidate && index - (int)runStart + 1 >= ConsolidationMinBars;
             if (isConsolidating && HighlightConsolidation)
             {
                 var rect = Chart.DrawRectangle("Consolidation_" + (int)runStart, (int)runStart, runHigh, index, runLow, ConsolidationColor);
@@ -900,9 +888,10 @@ namespace cAlgo
 
             ConsolidationActive[index] = isConsolidating ? 1 : 0;
             _consolActive[index] = isConsolidating ? 1 : 0;
-            _consolRunStart[index] = isConsolidating ? runStart : double.NaN;
-            _consolRunHigh[index] = isConsolidating ? runHigh : double.NaN;
-            _consolRunLow[index] = isConsolidating ? runLow : double.NaN;
+            _consolCandidate[index] = isCandidate ? 1 : 0;
+            _consolRunStart[index] = isCandidate ? runStart : double.NaN;
+            _consolRunHigh[index] = isCandidate ? runHigh : double.NaN;
+            _consolRunLow[index] = isCandidate ? runLow : double.NaN;
         }
 
         // =====================================================================
