@@ -51,9 +51,10 @@ namespace cAlgo
     // fallback plan if you hit a CT0003 "single algo type" build error.
     //
     // ENTRY: the standard entry trigger is a signal from the indicator
-    // (BullishSignal/BearishSignal on the just-closed bar) - fired when
-    // price touches the 50% retracement of the D-C leg in the indicator's
-    // A-B-C-D sequence (see STRATEGY.md). Optionally, Enable Confidence Mode
+    // (BullishSignal/BearishSignal on the just-closed bar) - fired when the
+    // D is confirmed after the A-B-C 100% expansion, then places a limit
+    // order at the 50% D-C retracement level. Optionally,
+    // Enable Confidence Mode
     // also trades confirmed green confidence dots as buys and red dots as
     // sells. OnBarClosed reads the enabled signals and hands them to
     // TryEnter.
@@ -63,7 +64,7 @@ namespace cAlgo
     //     itself and used as-is, with NO buffer, floor, ceiling, or R:R
     //     hierarchy applied on top: StopAnchor is C (StopLossMode.
     //     Conservative) or A (StopLossMode.Normal), and TargetLevel is the
-    //     261.8% extension of the C->D leg. See STRATEGY.md.
+    //     261.8% A-B-C expansion. See STRATEGY.md.
     //   - Min/Max risk amount (MinRiskAmount/MaxRiskAmount, account
     //     currency, 0 = off): estimates the trade's dollar risk from
     //     stopLossPips x Symbol.PipValue x volume and skips the trade if it
@@ -164,7 +165,7 @@ namespace cAlgo
         // === Risk / trade management ==========================================
         // Stop-loss and take-profit are both dictated by the strategy itself
         // (the indicator's StopAnchor = A or C per StopMode, and TargetLevel
-        // = the 261.8% C->D extension) - no ATR buffer, floor, ceiling, or
+        // = the 261.8% A-B-C expansion) - no ATR buffer, floor, ceiling, or
         // R:R hierarchy is applied on top. See STRATEGY.md.
         [Parameter("Volume (lots)", DefaultValue = 0.01, MinValue = 0.01, Step = 0.01, Group = "Risk")]
         public double VolumeInLots { get; set; }
@@ -238,6 +239,7 @@ namespace cAlgo
         // position.StopLoss no longer reflects the original risk, so "1R
         // profit reached" can't be derived from the live stop alone.
         private readonly Dictionary<long, double> _originalRiskDistance = new Dictionary<long, double>();
+        private readonly Dictionary<long, double> _pendingOrderCancellationLevels = new Dictionary<long, double>();
 
         protected override void OnStart()
         {
@@ -252,6 +254,8 @@ namespace cAlgo
 
             _atr = Indicators.AverageTrueRange(AtrPeriod, MovingAverageType.WilderSmoothing);
             Positions.Closed += OnPositionClosed;
+            PendingOrders.Filled += OnPendingOrderFilled;
+            CancelCarriedOverPendingOrders();
 
             UpdateTradingStatusDisplay();
         }
@@ -259,6 +263,20 @@ namespace cAlgo
         private void OnPositionClosed(PositionClosedEventArgs args)
         {
             _originalRiskDistance.Remove(args.Position.Id);
+        }
+
+        private void OnPendingOrderFilled(PendingOrderFilledEventArgs args)
+        {
+            _pendingOrderCancellationLevels.Remove(args.PendingOrder.Id);
+            var position = args.Position;
+            if (position.Label != Label || position.SymbolName != SymbolName || !position.StopLoss.HasValue)
+                return;
+
+            _originalRiskDistance[position.Id] = Math.Abs(position.EntryPrice - position.StopLoss.Value);
+            if (position.TradeType == TradeType.Buy)
+                _lastLongEntryPrice = position.EntryPrice;
+            else
+                _lastShortEntryPrice = position.EntryPrice;
         }
 
         // Static (chart-anchored, not price/time-anchored) text in the
@@ -280,19 +298,20 @@ namespace cAlgo
                 return;
 
             if (_signal.BearishSignal[index] > 0.5)
-                TryEnter(-1, index, _signal.StopAnchor[index], _signal.TargetLevel[index]);
+                TryEnter(-1, index, _signal.EntryLevel[index], _signal.StopAnchor[index], _signal.TargetLevel[index], _signal.OrderCancellationLevel[index], true);
             if (_signal.BullishSignal[index] > 0.5)
-                TryEnter(1, index, _signal.StopAnchor[index], _signal.TargetLevel[index]);
+                TryEnter(1, index, _signal.EntryLevel[index], _signal.StopAnchor[index], _signal.TargetLevel[index], _signal.OrderCancellationLevel[index], true);
             if (EnableConfidenceMode && _signal.ConfidenceSellSignal[index] > 0.5)
-                TryEnter(-1, index, _signal.ConfidenceStopAnchor[index], _signal.ConfidenceTargetLevel[index]);
+                TryEnter(-1, index, Bars.ClosePrices[index], _signal.ConfidenceStopAnchor[index], _signal.ConfidenceTargetLevel[index], double.NaN, false);
             if (EnableConfidenceMode && _signal.ConfidenceBuySignal[index] > 0.5)
-                TryEnter(1, index, _signal.ConfidenceStopAnchor[index], _signal.ConfidenceTargetLevel[index]);
+                TryEnter(1, index, Bars.ClosePrices[index], _signal.ConfidenceStopAnchor[index], _signal.ConfidenceTargetLevel[index], double.NaN, false);
 
             _lastProcessedIndex = index;
         }
 
         protected override void OnTick()
         {
+            CancelInvalidatedPendingOrders();
             if (MoveToBreakeven || UseTrailingStop)
                 ManageOpenPositions();
         }
@@ -375,10 +394,10 @@ namespace cAlgo
         // stopLevel and targetLevel come straight from the indicator's
         // StopAnchor/TargetLevel outputs - the strategy (STRATEGY.md) fully
         // specifies both, so they're used as-is, with no ATR buffer, floor,
-        // ceiling, or R:R hierarchy layered on top. This method just applies
-        // the trade-management filters (spread, session, direction conflict,
-        // clustering, risk-amount bounds) before firing the order.
-        private void TryEnter(int dir, int index, double stopLevel, double targetLevel)
+        // ceiling, or R:R hierarchy layered on top. Primary signals place
+        // continuation stop orders at entryLevel; confidence signals retain
+        // their market-entry behavior.
+        private void TryEnter(int dir, int index, double entryLevel, double stopLevel, double targetLevel, double cancellationLevel, bool placeLimitOrder)
         {
             if (!EnableTrading)
                 return;
@@ -386,7 +405,7 @@ namespace cAlgo
             if (_signal.ConsolidationActive[index] > 0.5)
                 return;
 
-            if (double.IsNaN(stopLevel) || double.IsNaN(targetLevel))
+            if (double.IsNaN(entryLevel) || double.IsNaN(stopLevel) || double.IsNaN(targetLevel) || (placeLimitOrder && double.IsNaN(cancellationLevel)))
                 return;
 
             if (SpreadTooWide())
@@ -397,8 +416,10 @@ namespace cAlgo
 
             var tradeType = dir == 1 ? TradeType.Buy : TradeType.Sell;
             var myPositions = GetMyPositions();
+            var myPendingOrders = GetMyPendingOrders();
             bool alreadySameDirection = myPositions.Exists(p => p.TradeType == tradeType);
-            if (!AllowMultiplePositions && alreadySameDirection)
+            bool pendingSameDirection = myPendingOrders.Exists(p => p.TradeType == tradeType);
+            if (!AllowMultiplePositions && (alreadySameDirection || pendingSameDirection))
                 return;
 
             // Don't sell into an open buy, or buy into an open sell. An
@@ -408,11 +429,18 @@ namespace cAlgo
             if (BlockOppositeDirection)
             {
                 bool oppositeOpen = myPositions.Exists(p => p.TradeType != tradeType);
-                if (oppositeOpen)
+                bool oppositePending = myPendingOrders.Exists(p => p.TradeType != tradeType);
+                if (oppositeOpen || oppositePending)
                     return;
             }
 
-            double price = Bars.ClosePrices[index];
+            double price = entryLevel;
+            if (placeLimitOrder)
+            {
+                bool isValidLimitPrice = dir == 1 ? price < Symbol.Ask : price > Symbol.Bid;
+                if (!isValidLimitPrice)
+                    return;
+            }
 
             // Don't re-enter the same direction right on top of the last
             // entry in that direction - that's what turns a ranging market
@@ -460,14 +488,44 @@ namespace cAlgo
             if (MaxRiskAmount > 0 && estimatedRiskAmount > MaxRiskAmount)
                 return;
 
-            var result = ExecuteMarketOrder(tradeType, SymbolName, volume, Label, stopLossPips, takeProfitPips);
-            if (result.IsSuccessful && result.Position != null)
+            var result = placeLimitOrder
+                ? PlaceLimitOrder(tradeType, SymbolName, volume, price, Label, stopLevel, targetLevel, ProtectionType.Absolute)
+                : ExecuteMarketOrder(tradeType, SymbolName, volume, Label, stopLossPips, takeProfitPips);
+            if (!placeLimitOrder && result.IsSuccessful && result.Position != null)
             {
                 _originalRiskDistance[result.Position.Id] = stopDistance;
                 if (dir == 1)
                     _lastLongEntryPrice = result.Position.EntryPrice;
                 else
                     _lastShortEntryPrice = result.Position.EntryPrice;
+            }
+            else if (placeLimitOrder && result.IsSuccessful && result.PendingOrder != null)
+            {
+                _pendingOrderCancellationLevels[result.PendingOrder.Id] = cancellationLevel;
+            }
+        }
+
+        private void CancelCarriedOverPendingOrders()
+        {
+            foreach (var order in GetMyPendingOrders())
+                CancelPendingOrder(order);
+        }
+
+        private void CancelInvalidatedPendingOrders()
+        {
+            foreach (var order in GetMyPendingOrders())
+            {
+                if (!_pendingOrderCancellationLevels.TryGetValue(order.Id, out double cancellationLevel))
+                    continue;
+
+                bool returnedToD = order.TradeType == TradeType.Buy
+                    ? Symbol.Bid >= cancellationLevel
+                    : Symbol.Ask <= cancellationLevel;
+                if (returnedToD)
+                {
+                    CancelPendingOrder(order);
+                    _pendingOrderCancellationLevels.Remove(order.Id);
+                }
             }
         }
 
@@ -503,6 +561,15 @@ namespace cAlgo
             foreach (var p in Positions)
                 if (p.Label == Label && p.SymbolName == SymbolName)
                     result.Add(p);
+            return result;
+        }
+
+        private List<PendingOrder> GetMyPendingOrders()
+        {
+            var result = new List<PendingOrder>();
+            foreach (var order in PendingOrders)
+                if (order.Label == Label && order.SymbolName == SymbolName)
+                    result.Add(order);
             return result;
         }
     }

@@ -49,21 +49,22 @@ namespace cAlgo
     //   Wait for a close past the 100% extension of A-B-C (= C + (B-A)).
     //   D = the next confirmed swing pivot after that break (the new
     //       extreme of the second leg).
-    //   Entry = the 50% retracement of D-C (= (D+C)/2) - BullishSignal/
-    //   BearishSignal fires the bar price wicks back to touch it.
+    //   Entry = a limit order at the 50% retracement of D-C.
     //   Invalidated at any point (after A) if price closes back through A.
     //
     // A fresh trigger for a direction always restarts that direction's
     // sequence from the new A, abandoning any stale in-progress attempt.
     //
     // OUTPUTS (the Robot's entire interface into this indicator):
-    //   - BullishSignal / BearishSignal: 1 on the bar the D-C 50% entry is
-    //     touched (and, if RequireTrendFilter is on, the HTF SMA trend
-    //     regime agrees), 0 otherwise.
+    //   - BullishSignal / BearishSignal: 1 when D confirms and the 50% D-C
+    //     retracement order can be placed (and, if RequireTrendFilter is on,
+    //     the HTF SMA trend regime agrees), 0 otherwise.
     //   - StopAnchor: on a signal bar, C (StopLossMode.Conservative) or A
     //     (StopLossMode.Normal). NaN otherwise.
-    //   - TargetLevel: on a signal bar, the 261.8% extension of the C->D
-    //     leg: C + (D - C) x 2.618. NaN otherwise. This single formula
+    //   - EntryLevel: on a signal bar, the 50% retracement of D-C. NaN
+    //     otherwise.
+    //   - TargetLevel: on a signal bar, the 261.8% expansion of A->B->C:
+    //     C + (B - A) x 2.618. NaN otherwise. This single formula
     //     already produces the correct (mirrored) result for a bearish
     //     setup without needing direction-specific logic.
     // =========================================================================
@@ -115,11 +116,17 @@ namespace cAlgo
         [Parameter("Min. Sweep/Break Depth beyond level (x ATR)", DefaultValue = SharedSignalDefaults.MinSweepDepthATRmult, MinValue = 0.0, Step = 0.05, Group = "Signal")]
         public double MinSweepDepthATRmult { get; set; }
 
-        // Conservative -> SL at C (tighter, inside the D-C retracement).
+        // Conservative -> SL at C (tighter, inside the second retracement).
         // Normal -> SL at A (wider, the original swing extreme). See
         // STRATEGY.md.
         [Parameter("Stop-Loss Mode", DefaultValue = SharedSignalDefaults.StopMode, Group = "Signal")]
         public StopLossMode StopMode { get; set; }
+
+        [Parameter("Show A-B-C-D Structure", DefaultValue = true, Group = "Signal")]
+        public bool ShowAbcdStructure { get; set; }
+
+        [Parameter("A-B-C Projection Width (bars)", DefaultValue = 20, MinValue = 5, MaxValue = 500, Group = "Signal")]
+        public int AbcdProjectionBars { get; set; }
         // === End of shared config ==============================================
 
         // === Confidence Dots - NOT part of shared config/GetIndicator<T>(). ===
@@ -171,6 +178,8 @@ namespace cAlgo
         // the chart's own _atr, since the SMAs it measures the separation
         // of live on that longer horizon too.
         private const double TrendSeparationATRmult = 0.5;
+        private const int StructureLineThickness = 1;
+        private static readonly double[] AbcdExpansionRatios = { 0.0, 0.5, 1.0, 1.618, 2.0, 2.618, 3.618 };
 
         // 261.8% extension ratio used for TargetLevel - see STRATEGY.md.
         private const double TargetExtensionRatio = 2.618;
@@ -194,6 +203,8 @@ namespace cAlgo
         private static readonly Color SwingLowLineColor = Color.FromArgb(160, 0, 200, 120);
         private static readonly Color SwingHighLineColor = Color.FromArgb(160, 220, 60, 60);
         private static readonly Color ConsolidationColor = Color.FromArgb(45, 255, 193, 7);
+        private static readonly Color AbcdBullColor = Color.FromArgb(255, 0, 140, 90);
+        private static readonly Color AbcdBearColor = Color.FromArgb(255, 180, 35, 35);
 
         [Output("Bullish Signal", LineColor = "Transparent")]
         public IndicatorDataSeries BullishSignal { get; set; }
@@ -206,6 +217,12 @@ namespace cAlgo
 
         [Output("Target Level", LineColor = "Transparent")]
         public IndicatorDataSeries TargetLevel { get; set; }
+
+        [Output("Entry Level", LineColor = "Transparent")]
+        public IndicatorDataSeries EntryLevel { get; set; }
+
+        [Output("Order Cancellation Level", LineColor = "Transparent")]
+        public IndicatorDataSeries OrderCancellationLevel { get; set; }
 
         [Output("Confidence Buy", LineColor = "Transparent")]
         public IndicatorDataSeries ConfidenceBuySignal { get; set; }
@@ -273,20 +290,23 @@ namespace cAlgo
 
         // A-B-C-D sequence state, per direction (index 0 = bullish,
         // index 1 = bearish). State values: 0 Idle, 1 SeekingB, 2 SeekingC,
-        // 3 SeekingExtensionBreak, 4 SeekingD, 5 SeekingEntry.
+        // 3 SeekingExtensionBreak, 4 SeekingD.
         private IndicatorDataSeries[] _seqState = new IndicatorDataSeries[2];
         private IndicatorDataSeries[] _seqPhaseStartBar = new IndicatorDataSeries[2];
         private IndicatorDataSeries[] _seqA = new IndicatorDataSeries[2];
         private IndicatorDataSeries[] _seqB = new IndicatorDataSeries[2];
         private IndicatorDataSeries[] _seqC = new IndicatorDataSeries[2];
         private IndicatorDataSeries[] _seqD = new IndicatorDataSeries[2];
+        private IndicatorDataSeries[] _seqABar = new IndicatorDataSeries[2];
+        private IndicatorDataSeries[] _seqBBar = new IndicatorDataSeries[2];
+        private IndicatorDataSeries[] _seqCBar = new IndicatorDataSeries[2];
+        private IndicatorDataSeries[] _seqDBar = new IndicatorDataSeries[2];
 
         private const double StIdle = 0;
         private const double StSeekingB = 1;
         private const double StSeekingC = 2;
         private const double StSeekingExt = 3;
         private const double StSeekingD = 4;
-        private const double StSeekingEntry = 5;
 
         // Confidence Dots state - see the "Confidence Dots" parameter group
         // and DrawSwingDot/UpdateConfidenceDots below. Ported from the
@@ -340,6 +360,10 @@ namespace cAlgo
                 _seqB[i] = CreateDataSeries();
                 _seqC[i] = CreateDataSeries();
                 _seqD[i] = CreateDataSeries();
+                _seqABar[i] = CreateDataSeries();
+                _seqBBar[i] = CreateDataSeries();
+                _seqCBar[i] = CreateDataSeries();
+                _seqDBar[i] = CreateDataSeries();
             }
 
             var confLowerTf = GetAutoConfidenceLowerTimeframe();
@@ -357,6 +381,8 @@ namespace cAlgo
             BearishSignal[index] = 0;
             StopAnchor[index] = double.NaN;
             TargetLevel[index] = double.NaN;
+            EntryLevel[index] = double.NaN;
+            OrderCancellationLevel[index] = double.NaN;
             ConfidenceBuySignal[index] = 0;
             ConfidenceSellSignal[index] = 0;
             ConfidenceStopAnchor[index] = double.NaN;
@@ -575,6 +601,10 @@ namespace cAlgo
             double b = index > 0 ? _seqB[dirIdx][index - 1] : double.NaN;
             double c = index > 0 ? _seqC[dirIdx][index - 1] : double.NaN;
             double d = index > 0 ? _seqD[dirIdx][index - 1] : double.NaN;
+            double aBar = index > 0 ? _seqABar[dirIdx][index - 1] : double.NaN;
+            double bBar = index > 0 ? _seqBBar[dirIdx][index - 1] : double.NaN;
+            double cBar = index > 0 ? _seqCBar[dirIdx][index - 1] : double.NaN;
+            double dBar = index > 0 ? _seqDBar[dirIdx][index - 1] : double.NaN;
 
             if (triggered)
             {
@@ -584,6 +614,10 @@ namespace cAlgo
                 b = double.NaN;
                 c = double.NaN;
                 d = double.NaN;
+                aBar = index;
+                bBar = double.NaN;
+                cBar = double.NaN;
+                dBar = double.NaN;
             }
             else if (state != StIdle)
             {
@@ -596,6 +630,7 @@ namespace cAlgo
                     state = StIdle;
                     phaseStartBar = double.NaN;
                     a = double.NaN; b = double.NaN; c = double.NaN; d = double.NaN;
+                    aBar = double.NaN; bBar = double.NaN; cBar = double.NaN; dBar = double.NaN;
                 }
                 else if (state == StSeekingB)
                 {
@@ -603,7 +638,10 @@ namespace cAlgo
                     // point as the true anchor instead of getting stuck on a
                     // stale one.
                     if (dir == 1 ? barLow < a : barHigh > a)
+                    {
                         a = dir == 1 ? barLow : barHigh;
+                        aBar = index;
+                    }
 
                     int candidate = index - SwingRightBars;
                     if (candidate > phaseStartBar)
@@ -616,6 +654,7 @@ namespace cAlgo
                             if (beyondA)
                             {
                                 b = candidatePrice;
+                                bBar = candidate;
                                 state = StSeekingC;
                                 phaseStartBar = candidate;
                             }
@@ -635,7 +674,10 @@ namespace cAlgo
                             double candidateExtreme = dir == 1 ? Bars.HighPrices[candidate] : Bars.LowPrices[candidate];
                             bool extendsB = dir == 1 ? candidateExtreme > b : candidateExtreme < b;
                             if (extendsB)
+                            {
                                 b = candidateExtreme;
+                                bBar = candidate;
+                            }
                         }
 
                         bool isPivotC = dir == 1 ? IsPivotLow(candidate, SwingLeftBars, SwingRightBars) : IsPivotHigh(candidate, SwingLeftBars, SwingRightBars);
@@ -646,6 +688,7 @@ namespace cAlgo
                             if (isValidRetracement)
                             {
                                 c = candidatePrice;
+                                cBar = candidate;
                                 state = StSeekingExt;
                                 phaseStartBar = candidate;
                             }
@@ -671,24 +714,23 @@ namespace cAlgo
                         if (isPivot)
                         {
                             d = dir == 1 ? Bars.HighPrices[candidate] : Bars.LowPrices[candidate];
-                            state = StSeekingEntry;
-                            phaseStartBar = candidate;
-                        }
-                    }
-                }
-                else if (state == StSeekingEntry)
-                {
-                    double entryPrice = (d + c) / 2.0;
-                    bool touched = dir == 1 ? barLow <= entryPrice : barHigh >= entryPrice;
-                    if (touched && TrendFilterOK(dir, index) && !ConsolidationBlocksEntry(dir, index, entryPrice))
-                    {
-                        signalSeries[index] = 1;
-                        StopAnchor[index] = StopMode == StopLossMode.Conservative ? c : a;
-                        TargetLevel[index] = c + (d - c) * TargetExtensionRatio;
+                            dBar = candidate;
+                            double entryPrice = (d + c) / 2.0;
+                            if (HasForwardStructure(aBar, bBar, cBar, dBar) && TrendFilterOK(dir, index) && !ConsolidationBlocksEntry(dir, index, entryPrice))
+                            {
+                                signalSeries[index] = 1;
+                                EntryLevel[index] = entryPrice;
+                                OrderCancellationLevel[index] = d;
+                                StopAnchor[index] = StopMode == StopLossMode.Conservative ? c : a;
+                                TargetLevel[index] = c + (b - a) * TargetExtensionRatio;
+                                DrawAbcdStructure(index, dir, (int)aBar, a, (int)bBar, b, (int)cBar, c, (int)dBar, d);
 
-                        state = StIdle;
-                        phaseStartBar = double.NaN;
-                        a = double.NaN; b = double.NaN; c = double.NaN; d = double.NaN;
+                                state = StIdle;
+                                phaseStartBar = double.NaN;
+                                a = double.NaN; b = double.NaN; c = double.NaN; d = double.NaN;
+                                aBar = double.NaN; bBar = double.NaN; cBar = double.NaN; dBar = double.NaN;
+                            }
+                        }
                     }
                 }
             }
@@ -699,6 +741,56 @@ namespace cAlgo
             _seqB[dirIdx][index] = b;
             _seqC[dirIdx][index] = c;
             _seqD[dirIdx][index] = d;
+            _seqABar[dirIdx][index] = aBar;
+            _seqBBar[dirIdx][index] = bBar;
+            _seqCBar[dirIdx][index] = cBar;
+            _seqDBar[dirIdx][index] = dBar;
+        }
+
+        private void DrawAbcdStructure(int signalIndex, int dir, int aBar, double a, int bBar, double b, int cBar, double c, int dBar, double d)
+        {
+            if (!ShowAbcdStructure || !HasForwardStructure(aBar, bBar, cBar, dBar))
+                return;
+
+            string name = $"ABCD_{(dir == 1 ? "Bull" : "Bear")}_{signalIndex}";
+            Color color = dir == 1 ? AbcdBullColor : AbcdBearColor;
+
+            // Remove chart objects drawn by the earlier manual ABCD renderer.
+            Chart.RemoveObject(name + "_AB");
+            Chart.RemoveObject(name + "_BC");
+            Chart.RemoveObject(name + "_CD");
+            Chart.RemoveObject(name + "_A");
+            Chart.RemoveObject(name + "_B");
+            Chart.RemoveObject(name + "_C");
+            Chart.RemoveObject(name + "_D");
+            Chart.RemoveObject(name + "_E");
+            Chart.RemoveObject(name + "_Entry");
+            Chart.RemoveObject(name);
+            Chart.RemoveObject(name + "_DC");
+
+            int expansionEndBar = Math.Min(Bars.Count - 1, cBar + AbcdProjectionBars);
+            int entryEndBar = Math.Min(Bars.Count - 1, dBar + AbcdProjectionBars);
+            Chart.DrawTrendLine(name + "_AB", Bars.OpenTimes[aBar], a, Bars.OpenTimes[bBar], b, color, StructureLineThickness, LineStyle.Solid);
+            Chart.DrawTrendLine(name + "_BC", Bars.OpenTimes[bBar], b, Bars.OpenTimes[cBar], c, color, StructureLineThickness, LineStyle.Solid);
+            for (int i = 0; i < AbcdExpansionRatios.Length; i++)
+            {
+                double level = c + (b - a) * AbcdExpansionRatios[i];
+                Chart.DrawTrendLine(name + "_Level" + i, Bars.OpenTimes[cBar], level, Bars.OpenTimes[expansionEndBar], level, color, StructureLineThickness, LineStyle.DotsRare);
+            }
+
+            double entryLevel = (d + c) / 2.0;
+            Chart.DrawTrendLine(name + "_Entry", Bars.OpenTimes[dBar], entryLevel, Bars.OpenTimes[entryEndBar], entryLevel, color, StructureLineThickness, LineStyle.Solid);
+            Chart.DrawText(name + "_A", "A", Bars.OpenTimes[aBar], a, color);
+            Chart.DrawText(name + "_B", "B", Bars.OpenTimes[bBar], b, color);
+            Chart.DrawText(name + "_C", "C", Bars.OpenTimes[cBar], c, color);
+            Chart.DrawText(name + "_D", "D", Bars.OpenTimes[dBar], d, color);
+            Chart.DrawText(name + "_E", "E (50% entry)", Bars.OpenTimes[dBar], entryLevel, color);
+        }
+
+        private static bool HasForwardStructure(double aBar, double bBar, double cBar, double dBar)
+        {
+            return !double.IsNaN(aBar) && !double.IsNaN(bBar) && !double.IsNaN(cBar) && !double.IsNaN(dBar)
+                && aBar < bBar && bBar < cBar && cBar < dBar;
         }
 
         // SMA trend + separation (on the higher timeframe - see

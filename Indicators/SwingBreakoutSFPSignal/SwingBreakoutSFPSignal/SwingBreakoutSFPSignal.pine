@@ -1,5 +1,5 @@
 //@version=6
-indicator("Swing Breakout SFP Signal", shorttitle = "Swing SFP", overlay = true, max_labels_count = 500, max_boxes_count = 500)
+indicator("Swing Breakout SFP Signal", shorttitle = "Swing SFP", overlay = true, max_labels_count = 500, max_lines_count = 500, max_boxes_count = 500)
 
 // Pine Script translation of the cTrader SwingBreakoutSFPSignal indicator.
 // Signals are confirmed at bar close. Pivot-dependent features appear only
@@ -16,6 +16,7 @@ swingRight = input.int(5, "Swing Lookback - Right Bars", minval = 1, maxval = 50
 atrPeriod = input.int(5, "ATR Period", minval = 1, group = groupSignal)
 minSweepAtr = input.float(0.10, "Min. Sweep/Break Depth beyond level (x ATR)", minval = 0, step = 0.05, group = groupSignal)
 stopMode = input.string("Normal", "Stop-Loss Mode", options = ["Conservative", "Normal"], group = groupSignal)
+showAbcdStructure = input.bool(true, "Show A-B-C-D Structure", group = groupSignal)
 
 trackPriorSwing = input.bool(true, "Track Prior Swing High/Low", group = groupLevels)
 trackPDHPDL = input.bool(true, "Track Prior Day High/Low/Close", group = groupLevels)
@@ -204,7 +205,7 @@ f_consolidation_blocks_entry(dir, entryPrice) =>
         blocked := not isRetest
     blocked
 
-// A-B-C-D state machine: 0 idle, 1 B, 2 C, 3 extension, 4 D, 5 entry.
+// A-B-C-D state machine: 0 idle, 1 B, 2 C, 3 extension, 4 D.
 var int bullState = 0
 var int bearState = 0
 var int bullPhaseStart = na
@@ -217,10 +218,37 @@ var float bearA = na
 var float bearB = na
 var float bearC = na
 var float bearD = na
+var int bullABar = na
+var int bullBBar = na
+var int bullCBar = na
+var int bullDBar = na
+var int bearABar = na
+var int bearBBar = na
+var int bearCBar = na
+var int bearDBar = na
 bool bullishSignal = false
 bool bearishSignal = false
 float stopAnchor = na
 float targetLevel = na
+float entryLevel = na
+
+f_draw_abcd_expansion(aBar, a, bBar, b, cBar, c, dBar, d, signalBar, isBullish, color) =>
+    if aBar < bBar and bBar < cBar and cBar < dBar
+        line.new(aBar, a, bBar, b, color = color, width = 1)
+        line.new(bBar, b, cBar, c, color = color, width = 1)
+        label.new(aBar, a, "A", style = isBullish ? label.style_label_up : label.style_label_down, color = color, textcolor = color.white)
+        label.new(bBar, b, "B", style = isBullish ? label.style_label_down : label.style_label_up, color = color, textcolor = color.white)
+        label.new(cBar, c, "C", style = isBullish ? label.style_label_up : label.style_label_down, color = color, textcolor = color.white)
+        float leg = b - a
+        for ratio in array.from(0.0, 0.5, 1.0, 1.618, 2.0, 2.618, 3.618)
+            float level = c + leg * ratio
+            string levelText = str.tostring(ratio * 100, "#.###") + "%"
+            line.new(cBar, level, signalBar, level, color = color, style = line.style_dotted)
+            label.new(signalBar, level, levelText, style = label.style_none, textcolor = color)
+        label.new(dBar, d, "D", style = isBullish ? label.style_label_down : label.style_label_up, color = color, textcolor = color.white)
+        float entry = (d + c) / 2
+        line.new(dBar, entry, signalBar, entry, color = color, width = 2)
+        label.new(signalBar, entry, "E (50% entry)", style = label.style_none, textcolor = color)
 
 if bullishSfp or bullishBnr
     bullState := 1
@@ -229,20 +257,33 @@ if bullishSfp or bullishBnr
     bullB := na
     bullC := na
     bullD := na
+    bullABar := bar_index
+    bullBBar := na
+    bullCBar := na
+    bullDBar := na
 else if bullState != 0
     if bullState != 1 and close < bullA
         bullState := 0
+        bullABar := na
+        bullBBar := na
+        bullCBar := na
+        bullDBar := na
     else if bullState == 1
-        bullA := math.min(bullA, low)
+        if low < bullA
+            bullA := low
+            bullABar := bar_index
         if not na(pivotHigh) and bar_index - swingRight > bullPhaseStart and pivotHigh > bullA
             bullB := pivotHigh
+            bullBBar := bar_index - swingRight
             bullState := 2
             bullPhaseStart := bar_index - swingRight
     else if bullState == 2
         if not na(pivotHigh) and bar_index - swingRight > bullPhaseStart and pivotHigh > bullB
             bullB := pivotHigh
+            bullBBar := bar_index - swingRight
         if not na(pivotLow) and bar_index - swingRight > bullPhaseStart and pivotLow < bullB and pivotLow > bullA
             bullC := pivotLow
+            bullCBar := bar_index - swingRight
             bullState := 3
             bullPhaseStart := bar_index - swingRight
     else if bullState == 3 and close > bullC + (bullB - bullA)
@@ -250,13 +291,15 @@ else if bullState != 0
         bullPhaseStart := bar_index
     else if bullState == 4 and not na(pivotHigh) and bar_index - swingRight > bullPhaseStart
         bullD := pivotHigh
-        bullState := 5
-        bullPhaseStart := bar_index - swingRight
-    else if bullState == 5 and low <= (bullD + bullC) / 2 and trendBuy and not f_consolidation_blocks_entry(1, (bullD + bullC) / 2)
-        bullishSignal := true
-        stopAnchor := stopMode == "Conservative" ? bullC : bullA
-        targetLevel := bullC + (bullD - bullC) * 2.618
-        bullState := 0
+        bullDBar := bar_index - swingRight
+        entryLevel := (bullD + bullC) / 2
+        if bullABar < bullBBar and bullBBar < bullCBar and bullCBar < bullDBar and trendBuy and not f_consolidation_blocks_entry(1, entryLevel)
+            bullishSignal := true
+            stopAnchor := stopMode == "Conservative" ? bullC : bullA
+            targetLevel := bullC + (bullB - bullA) * 2.618
+            if showAbcdStructure
+                f_draw_abcd_expansion(bullABar, bullA, bullBBar, bullB, bullCBar, bullC, bullDBar, bullD, bar_index, true, color.lime)
+            bullState := 0
 
 if bearishSfp or bearishBnr
     bearState := 1
@@ -265,20 +308,33 @@ if bearishSfp or bearishBnr
     bearB := na
     bearC := na
     bearD := na
+    bearABar := bar_index
+    bearBBar := na
+    bearCBar := na
+    bearDBar := na
 else if bearState != 0
     if bearState != 1 and close > bearA
         bearState := 0
+        bearABar := na
+        bearBBar := na
+        bearCBar := na
+        bearDBar := na
     else if bearState == 1
-        bearA := math.max(bearA, high)
+        if high > bearA
+            bearA := high
+            bearABar := bar_index
         if not na(pivotLow) and bar_index - swingRight > bearPhaseStart and pivotLow < bearA
             bearB := pivotLow
+            bearBBar := bar_index - swingRight
             bearState := 2
             bearPhaseStart := bar_index - swingRight
     else if bearState == 2
         if not na(pivotLow) and bar_index - swingRight > bearPhaseStart and pivotLow < bearB
             bearB := pivotLow
+            bearBBar := bar_index - swingRight
         if not na(pivotHigh) and bar_index - swingRight > bearPhaseStart and pivotHigh > bearB and pivotHigh < bearA
             bearC := pivotHigh
+            bearCBar := bar_index - swingRight
             bearState := 3
             bearPhaseStart := bar_index - swingRight
     else if bearState == 3 and close < bearC + (bearB - bearA)
@@ -286,18 +342,21 @@ else if bearState != 0
         bearPhaseStart := bar_index
     else if bearState == 4 and not na(pivotLow) and bar_index - swingRight > bearPhaseStart
         bearD := pivotLow
-        bearState := 5
-        bearPhaseStart := bar_index - swingRight
-    else if bearState == 5 and high >= (bearD + bearC) / 2 and trendSell and not f_consolidation_blocks_entry(-1, (bearD + bearC) / 2)
-        bearishSignal := true
-        stopAnchor := stopMode == "Conservative" ? bearC : bearA
-        targetLevel := bearC + (bearD - bearC) * 2.618
-        bearState := 0
+        bearDBar := bar_index - swingRight
+        entryLevel := (bearD + bearC) / 2
+        if bearABar < bearBBar and bearBBar < bearCBar and bearCBar < bearDBar and trendSell and not f_consolidation_blocks_entry(-1, entryLevel)
+            bearishSignal := true
+            stopAnchor := stopMode == "Conservative" ? bearC : bearA
+            targetLevel := bearC + (bearB - bearA) * 2.618
+            if showAbcdStructure
+                f_draw_abcd_expansion(bearABar, bearA, bearBBar, bearB, bearCBar, bearC, bearDBar, bearD, bar_index, false, color.red)
+            bearState := 0
 
 plotshape(bullishSignal, "Bullish SFP / B&R Entry", shape.circle, location.belowbar, color.lime, size = size.small, text = "BUY")
 plotshape(bearishSignal, "Bearish SFP / B&R Entry", shape.circle, location.abovebar, color.red, size = size.small, text = "SELL")
 plot(stopAnchor, "Stop Anchor", color = color.new(color.red, 0), style = plot.style_cross, linewidth = 2)
 plot(targetLevel, "Target Level", color = color.new(color.aqua, 0), style = plot.style_cross, linewidth = 2)
+plot(entryLevel, "Entry Level", color = color.new(color.yellow, 0), style = plot.style_cross, linewidth = 2)
 
 // Confidence dots use chart-bar volume direction. TradingView volume has no
 // true bid/ask split, so this is the closest portable equivalent to cTrader's

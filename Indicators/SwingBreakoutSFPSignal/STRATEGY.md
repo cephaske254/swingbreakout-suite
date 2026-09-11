@@ -93,22 +93,25 @@ is established:
    past the **100% extension level** (this sits above B — it's C plus the
    full A→B leg length, not just a new high above B).
 5. That breakout produces a **new high, D**.
-6. Wait for the **second retracement** — the pullback that follows D. This
-   is the retracement we care about; the entry is found here.
-7. Draw a standard Fibonacci **retracement** tool anchored on **D and C**.
-8. **Entry** at the **50% retracement** of D–C.
-9. **Stop-loss**:
+6. Draw a standard Fibonacci **retracement** tool from D to C.
+7. **E** is the 50% D→C retracement level. Place a **buy limit / sell limit
+   order**, rather than entering immediately, at E.
+   - When **Show A-B-C-D Structure** is enabled, the indicator draws the
+     A→B→C Fibonacci expansion: A, B, and C are its three anchors and its
+     extension levels are projected from C. This is visual-only; it does not
+     alter the entry, stop, or target.
+8. **Stop-loss**:
    - **Conservative mode** → SL at **C**.
    - **Normal mode** → SL at **A**.
-10. **Target**: the **261.8%** extension of the same C→D leg, projected
-    beyond D:
-    **Target = C + (D − C) × 2.618**
+9. **Target**: the **261.8%** A→B→C expansion, projected from C:
+    **Target = C + (B − A) × 2.618**
 
 Sell setups mirror all of the above (A = swing high, B = bottom of first leg
-down, C = top of first retracement, D = new low, SL above C or A, target
-below D by the same 2.618x C→D leg projection).
+down, C = top of first retracement, D = new low past the 100% expansion, E
+= the 50% D→C limit-order level, SL above C or A, target below C at the same
+2.618x A→B→C expansion).
 
-![Entry sequence diagram: A/B/C/D, the 100% extension, and the 50% D→C entry](../../strategy-entry-diagram.svg)
+![Entry sequence diagram: A/B/C/D, the 100% extension, and the second retracement](../../strategy-entry-diagram.svg)
 
 ## Status
 
@@ -134,10 +137,10 @@ made that weren't explicitly specified and are worth reviewing:
 - **B, during "seeking C"**: if a new, more extreme pivot forms before a
   retracement is confirmed, B is extended to it rather than treated as the
   final leg top.
-- **Entry trigger**: fires the bar price *wicks* to the 50% D→C level (not a
-  close), same convention as the SFP wick checks elsewhere in the indicator.
-  The Robot still enters at market on the next tick after the signal bar
-  closes - this is not a resting limit order at the 50% level.
+- **Entry order**: once D confirms beyond the 100% expansion, the Robot
+  places a limit order at E, the 50% D→C retracement. It does not enter at
+  market; the order fills only if price revisits E. If price returns to D
+  first, the pending order is cancelled so it cannot trigger later.
 - **Invalidation**: at any point after A is set, a close back through A
   abandons the whole attempt (not just a single stalled phase).
 - **Stop-Loss Mode** (`StopMode`: Conservative = SL at C, Normal = SL at A)
