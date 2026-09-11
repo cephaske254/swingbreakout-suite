@@ -37,6 +37,93 @@ indicator's `.cs` files (`SwingBreakoutSFPSignal.cs` and
 `SharedSignalDefaults.cs`) to the same robot project before building — see
 the header comments in `Swingbreakouttrader.cs` for the full setup notes.
 
+## Developer: cTrader Automate workspace
+
+For development in cTrader Automate, link its local source workspace to
+this repository rather than maintaining a second copy of either project.
+The linked folders are:
+
+- `Indicators/SwingBreakoutSFPSignal/`
+- `Robots/Swingbreakouttrader/`
+
+| Platform | Default local source workspace | Notes |
+|---|---|---|
+| Windows desktop | `%USERPROFILE%\Documents\cAlgo\Sources` | Use a directory junction from PowerShell. |
+| macOS desktop | `~/cAlgo/Sources` | Use symbolic links. |
+| Linux | `~/cAlgo/Sources` when created by local cTrader tooling | Use symbolic links if the local workspace exists. |
+| Web and mobile | None | These clients do not expose a local Automate source workspace. Develop/build on desktop or with the CLI. |
+
+Before creating either link, make sure the destination does **not** already
+exist. If it contains work you need, move it to a backup location first.
+
+### macOS and Linux
+
+Run these commands from the repository root:
+
+```bash
+workspace="$HOME/cAlgo/Sources"
+repo="$(pwd)"
+
+mkdir -p "$workspace/Indicators" "$workspace/Robots"
+ln -s "$repo/Indicators/SwingBreakoutSFPSignal" \
+  "$workspace/Indicators/SwingBreakoutSFPSignal"
+ln -s "$repo/Robots/Swingbreakouttrader" \
+  "$workspace/Robots/Swingbreakouttrader"
+```
+
+Confirm that both paths resolve into the repository:
+
+```bash
+readlink "$workspace/Indicators/SwingBreakoutSFPSignal"
+readlink "$workspace/Robots/Swingbreakouttrader"
+```
+
+### Windows
+
+Open **PowerShell** from the repository root and create directory junctions:
+
+```powershell
+$workspace = Join-Path $env:USERPROFILE "Documents\cAlgo\Sources"
+$repo = (Resolve-Path .).Path
+
+New-Item -ItemType Directory -Force -Path "$workspace\Indicators", "$workspace\Robots"
+New-Item -ItemType Junction -Path "$workspace\Indicators\SwingBreakoutSFPSignal" `
+  -Target "$repo\Indicators\SwingBreakoutSFPSignal"
+New-Item -ItemType Junction -Path "$workspace\Robots\Swingbreakouttrader" `
+  -Target "$repo\Robots\Swingbreakouttrader"
+```
+
+Use `Get-Item "$workspace\Indicators\SwingBreakoutSFPSignal"` and
+`Get-Item "$workspace\Robots\Swingbreakouttrader"` to confirm that each
+item is a junction. Open or build the linked source in cTrader Automate;
+changes made from cTrader are then changes in this Git repository.
+
+## Developer: TradingView Pine indicator
+
+The TradingView-only indicator is a Pine Script v6 translation at:
+
+`Indicators/SwingBreakoutSFPSignal/SwingBreakoutSFPSignal/SwingBreakoutSFPSignal.pine`
+
+It contains the indicator-side strategy only: active swing and daily levels,
+SFP/B&R detection, the A-B-C-D entry sequence, higher-timeframe trend
+filter, confidence dots, consolidation highlighting, stop/target plots, and
+alert conditions. It does **not** contain cTrader robot, order, or position
+management code.
+
+To install it in TradingView:
+
+1. Open **Pine Editor** on a chart.
+2. Create a new indicator script, replace its contents with the `.pine` file
+   above, then click **Save** and **Add to chart**.
+3. Create TradingView alerts from the script's bullish/bearish entry or
+   green/red confidence-dot alert conditions as needed.
+
+The Pine version uses TradingView's chart-bar volume direction
+(close above/below open) as the portable confidence proxy. The cTrader
+version can classify lower-timeframe tick-volume bars inside each chart bar,
+so confidence-dot colors can differ between the two platforms when their
+available volume data differs.
+
 ## Parameter defaults
 
 The 10 parameters shared between both algos are forwarded **positionally**
