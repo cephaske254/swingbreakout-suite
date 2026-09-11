@@ -27,6 +27,7 @@ requireTrendFilter = input.bool(true, "Require SMA trend filter (direction + sep
 showConfidenceDots = input.bool(true, "Show Confidence Dots", group = groupConfidence)
 majorLeft = input.int(15, "Major Swing Lookback - Left Bars", minval = 1, maxval = 100, group = groupConfidence)
 majorRight = input.int(15, "Major Swing Lookback - Right Bars", minval = 1, maxval = 100, group = groupConfidence)
+maxConfidenceDots = input.int(80, "Max Visible Confidence Dots (per tier)", minval = 10, maxval = 400, group = groupConfidence, tooltip = "Older dots beyond this count are deleted. Keeps the chart's price scale fitted to recent price action and keeps TradingView's renderer from lagging behind on pan/zoom.")
 
 highlightConsolidation = input.bool(true, "Highlight Consolidation", group = groupConsolidation)
 consolidationAdxPeriod = input.int(14, "Consolidation ADX Period", minval = 2, group = groupConsolidation)
@@ -307,6 +308,8 @@ majorHigh = ta.pivothigh(high, majorLeft, majorRight)
 majorLow = ta.pivotlow(low, majorLeft, majorRight)
 minorHigh = pivotHigh
 minorLow = pivotLow
+var array<label> majorDotLabels = array.new<label>()
+var array<label> minorDotLabels = array.new<label>()
 var int lastMajorCode = na
 var int lastMinorCode = na
 majorBuyPct = f_window_buy_pct(majorRight)
@@ -327,11 +330,15 @@ minorDotColor = minorCode == 1 ? color.new(color.lime, minorTransparency) : mino
 if majorDot
     lastMajorCode := majorCode
     majorY = not na(majorHigh) ? high[majorRight] + atr[majorRight] * 0.5 : low[majorRight] - atr[majorRight] * 0.5
-    label.new(time[majorRight], majorY, "", xloc = xloc.bar_time, style = label.style_diamond, size = size.normal, color = majorDotColor, tooltip = "Confidence: " + str.tostring(math.round(majorBuyPct)) + "%")
+    majorDotLabels.push(label.new(time[majorRight], majorY, "", xloc = xloc.bar_time, style = label.style_diamond, size = size.normal, color = majorDotColor, tooltip = "Confidence: " + str.tostring(math.round(majorBuyPct)) + "%"))
+    if majorDotLabels.size() > maxConfidenceDots
+        label.delete(majorDotLabels.shift())
 if minorDot
     lastMinorCode := minorCode
     minorY = not na(minorHigh) ? high[swingRight] + atr[swingRight] * 0.5 : low[swingRight] - atr[swingRight] * 0.5
-    label.new(time[swingRight], minorY, "", xloc = xloc.bar_time, style = label.style_circle, size = size.tiny, color = minorDotColor, tooltip = "Confidence: " + str.tostring(math.round(minorBuyPct)) + "%")
+    minorDotLabels.push(label.new(time[swingRight], minorY, "", xloc = xloc.bar_time, style = label.style_circle, size = size.tiny, color = minorDotColor, tooltip = "Confidence: " + str.tostring(math.round(minorBuyPct)) + "%"))
+    if minorDotLabels.size() > maxConfidenceDots
+        label.delete(minorDotLabels.shift())
 
 // Drawn ONCE, in full, the moment a run ends - not built up bar-by-bar by
 // mutating one persisted box object (that incremental box.set_right/
