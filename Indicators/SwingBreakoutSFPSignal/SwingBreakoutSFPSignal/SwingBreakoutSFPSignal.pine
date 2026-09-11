@@ -1,5 +1,5 @@
 //@version=6
-indicator("Swing Breakout SFP Signal", shorttitle = "Swing SFP", overlay = true, max_labels_count = 500)
+indicator("Swing Breakout SFP Signal", shorttitle = "Swing SFP", overlay = true, max_labels_count = 500, max_boxes_count = 500)
 
 // Pine Script translation of the cTrader SwingBreakoutSFPSignal indicator.
 // Signals are confirmed at bar close. Pivot-dependent features appear only
@@ -327,17 +327,26 @@ minorDotColor = minorCode == 1 ? color.new(color.lime, minorTransparency) : mino
 if majorDot
     lastMajorCode := majorCode
     majorY = not na(majorHigh) ? high[majorRight] + atr[majorRight] * 0.5 : low[majorRight] - atr[majorRight] * 0.5
-    label.new(bar_index - majorRight, majorY, "", style = label.style_diamond, size = size.normal, color = majorDotColor, tooltip = "Confidence: " + str.tostring(math.round(majorBuyPct)) + "%")
+    label.new(time[majorRight], majorY, "", xloc = xloc.bar_time, style = label.style_diamond, size = size.normal, color = majorDotColor, tooltip = "Confidence: " + str.tostring(math.round(majorBuyPct)) + "%")
 if minorDot
     lastMinorCode := minorCode
     minorY = not na(minorHigh) ? high[swingRight] + atr[swingRight] * 0.5 : low[swingRight] - atr[swingRight] * 0.5
-    label.new(bar_index - swingRight, minorY, "", style = label.style_circle, size = size.tiny, color = minorDotColor, tooltip = "Confidence: " + str.tostring(math.round(minorBuyPct)) + "%")
+    label.new(time[swingRight], minorY, "", xloc = xloc.bar_time, style = label.style_circle, size = size.tiny, color = minorDotColor, tooltip = "Confidence: " + str.tostring(math.round(minorBuyPct)) + "%")
 
 consolidationMid = (consolidationHigh + consolidationLow) / 2
-consolidationTop = plot(highlightConsolidation and consolidating ? consolidationHigh : na, "Consolidation Top", color = color.new(color.orange, 25), style = plot.style_linebr)
-consolidationBottom = plot(highlightConsolidation and consolidating ? consolidationLow : na, "Consolidation Bottom", color = color.new(color.lime, 25), style = plot.style_linebr)
-consolidationMidPlot = plot(highlightConsolidation and consolidating ? consolidationMid : na, "Consolidation Mid", color = color.new(color.gray, 45), style = plot.style_linebr)
-fill(consolidationTop, consolidationBottom, color = color.new(color.orange, 88), title = "Consolidation Range")
+var int consolidationStartTime = na
+var box consolidationBox = na
+if lowAdx and not lowAdx[1]
+    consolidationStartTime := time
+if not lowAdx
+    consolidationStartTime := na
+if highlightConsolidation and consolidating
+    if not consolidating[1]
+        consolidationBox := box.new(left = consolidationStartTime, top = consolidationHigh, right = time, bottom = consolidationLow, xloc = xloc.bar_time, border_color = color.new(color.orange, 25), bgcolor = color.new(color.orange, 88))
+    else
+        box.set_right(consolidationBox, time)
+        box.set_top(consolidationBox, consolidationHigh)
+        box.set_bottom(consolidationBox, consolidationLow)
 
 alertcondition(bullishSignal, "Bullish SFP / B&R Entry", "Bullish SFP / B&R entry on {{ticker}}")
 alertcondition(bearishSignal, "Bearish SFP / B&R Entry", "Bearish SFP / B&R entry on {{ticker}}")

@@ -389,13 +389,13 @@ namespace cAlgo
                 {
                     swingLowBroken = true;
                     if (TrackPriorSwing)
-                        Chart.DrawIcon("BreakLow" + index, ChartIconType.Circle, index, barLow - atrVal * 0.5, BreakoutColor);
+                        Chart.DrawIcon("BreakLow" + index, ChartIconType.Circle, Bars.OpenTimes[index], barLow - atrVal * 0.5, BreakoutColor);
                 }
                 if (!double.IsNaN(lastSwingHigh) && !swingHighBroken && barClose > lastSwingHigh)
                 {
                     swingHighBroken = true;
                     if (TrackPriorSwing)
-                        Chart.DrawIcon("BreakHigh" + index, ChartIconType.Circle, index, barHigh + atrVal * 0.5, BreakoutColor);
+                        Chart.DrawIcon("BreakHigh" + index, ChartIconType.Circle, Bars.OpenTimes[index], barHigh + atrVal * 0.5, BreakoutColor);
                 }
             }
 
@@ -437,9 +437,9 @@ namespace cAlgo
             if (TrackPriorSwing)
             {
                 if (!double.IsNaN(lastSwingLow) && !double.IsNaN(lastSwingLowBar) && !swingLowBroken)
-                    Chart.DrawTrendLine("SwingLowLine", (int)lastSwingLowBar, lastSwingLow, index, lastSwingLow, SwingLowLineColor);
+                    Chart.DrawTrendLine("SwingLowLine", Bars.OpenTimes[(int)lastSwingLowBar], lastSwingLow, Bars.OpenTimes[index], lastSwingLow, SwingLowLineColor);
                 if (!double.IsNaN(lastSwingHigh) && !double.IsNaN(lastSwingHighBar) && !swingHighBroken)
-                    Chart.DrawTrendLine("SwingHighLine", (int)lastSwingHighBar, lastSwingHigh, index, lastSwingHigh, SwingHighLineColor);
+                    Chart.DrawTrendLine("SwingHighLine", Bars.OpenTimes[(int)lastSwingHighBar], lastSwingHigh, Bars.OpenTimes[index], lastSwingHigh, SwingHighLineColor);
             }
 
             // === STEP 1: level reaction - SFP (single-bar) and B&R =========
@@ -480,9 +480,9 @@ namespace cAlgo
             ProcessSequence(1, -1, index, bearishTriggered, barHigh, barLow, barClose, BearishSignal);
 
             if (BearishSignal[index] > 0.5)
-                Chart.DrawIcon("SFPBear" + index, ChartIconType.Circle, index, barHigh + atrVal * 0.3, BearColor);
+                Chart.DrawIcon("SFPBear" + index, ChartIconType.Circle, Bars.OpenTimes[index], barHigh + atrVal * 0.3, BearColor);
             if (BullishSignal[index] > 0.5)
-                Chart.DrawIcon("SFPBull" + index, ChartIconType.Circle, index, barLow - atrVal * 0.3, BullColor);
+                Chart.DrawIcon("SFPBull" + index, ChartIconType.Circle, Bars.OpenTimes[index], barLow - atrVal * 0.3, BullColor);
 
             UpdateConfidenceDots(index);
         }
@@ -897,7 +897,7 @@ namespace cAlgo
             bool isConsolidating = isCandidate && index - (int)runStart + 1 >= ConsolidationMinBars;
             if (isConsolidating && HighlightConsolidation)
             {
-                var rect = Chart.DrawRectangle("Consolidation_" + (int)runStart, (int)runStart, runHigh, index, runLow, ConsolidationColor);
+                var rect = Chart.DrawRectangle("Consolidation_" + (int)runStart, Bars.OpenTimes[(int)runStart], runHigh, Bars.OpenTimes[index], runLow, ConsolidationColor);
                 rect.IsFilled = true;
             }
 
