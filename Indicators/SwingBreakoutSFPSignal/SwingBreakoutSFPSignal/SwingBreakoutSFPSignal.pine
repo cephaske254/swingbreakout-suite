@@ -272,8 +272,8 @@ if majorDot
     lastMajorCode := majorCode
 if minorDot
     lastMinorCode := minorCode
-plotshape(majorDot and majorCode == 1, "Major Green Confidence", shape.star, location.belowbar, color.lime, size = size.normal, offset = -majorRight)
-plotshape(majorDot and majorCode == -1, "Major Red Confidence", shape.star, location.abovebar, color.red, size = size.normal, offset = -majorRight)
+plotshape(majorDot and majorCode == 1, "Major Green Confidence", shape.diamond, location.belowbar, color.lime, size = size.normal, offset = -majorRight)
+plotshape(majorDot and majorCode == -1, "Major Red Confidence", shape.diamond, location.abovebar, color.red, size = size.normal, offset = -majorRight)
 plotshape(minorDot and minorCode == 1, "Minor Green Confidence", shape.circle, location.belowbar, color.lime, size = size.tiny, offset = -swingRight)
 plotshape(minorDot and minorCode == -1, "Minor Red Confidence", shape.circle, location.abovebar, color.red, size = size.tiny, offset = -swingRight)
 
