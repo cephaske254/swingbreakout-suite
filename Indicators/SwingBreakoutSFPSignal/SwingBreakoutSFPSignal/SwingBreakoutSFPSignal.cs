@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using cAlgo.API;
 using cAlgo.API.Indicators;
 
@@ -282,6 +283,15 @@ namespace cAlgo
         private Bars _confLowerBars; // null when no lower timeframe is in play
         private IndicatorDataSeries _lastMajorDotCode, _lastMinorDotCode;
 
+        // ChartIcon has no native hover tooltip in cTrader's desktop client
+        // (ChartObject.Comment is metadata only, not rendered), so confidence
+        // percentage on hover is implemented by hand: each drawn dot's
+        // position/value is recorded here, and Chart.MouseMove hit-tests the
+        // cursor against them to show/hide one reused ChartText label.
+        private readonly List<(int barIndex, DateTime time, double y, double pct, double radius)> _confidenceDotHits =
+            new List<(int, DateTime, double, double, double)>();
+        private ChartText _confidenceHoverLabel;
+
         protected override void Initialize()
         {
             _atr = Indicators.AverageTrueRange(AtrPeriod, MovingAverageType.WilderSmoothing);
@@ -320,6 +330,8 @@ namespace cAlgo
 
             _lastMajorDotCode = CreateDataSeries();
             _lastMinorDotCode = CreateDataSeries();
+
+            Chart.MouseMove += OnChartMouseMove;
         }
 
         public override void Calculate(int index)
@@ -983,8 +995,11 @@ namespace cAlgo
                         double dotY = isPivotHigh ? Bars.HighPrices[candidate] + offset : Bars.LowPrices[candidate] - offset;
 
                         string dotName = "conf" + iconType + "Dot_" + candidate;
-                        var dot = Chart.DrawIcon(dotName, iconType, Bars.OpenTimes[candidate], dotY, dotColor);
-                        dot.Comment = $"Confidence: {buyPctWindow:F0}%";
+                        Chart.DrawIcon(dotName, iconType, Bars.OpenTimes[candidate], dotY, dotColor);
+
+                        _confidenceDotHits.Add((candidate, Bars.OpenTimes[candidate], dotY, buyPctWindow, offset * 1.5));
+                        if (_confidenceDotHits.Count > 500)
+                            _confidenceDotHits.RemoveAt(0);
                     }
 
                     lastDotCode = code;
@@ -992,6 +1007,34 @@ namespace cAlgo
             }
 
             lastDotCodeSeries[index] = lastDotCode;
+        }
+
+        // Shows/hides the one reused hover label by hit-testing the cursor's
+        // bar/price against every recorded confidence dot. Nearest-bar match
+        // within the dot's own draw offset counts as a hit.
+        private void OnChartMouseMove(ChartMouseEventArgs args)
+        {
+            int hoverBar = (int)Math.Round(args.BarIndex);
+            double hoverY = args.YValue;
+
+            for (int i = _confidenceDotHits.Count - 1; i >= 0; i--)
+            {
+                var hit = _confidenceDotHits[i];
+                if (Math.Abs(hit.barIndex - hoverBar) <= 1 && Math.Abs(hit.y - hoverY) <= hit.radius)
+                {
+                    if (_confidenceHoverLabel == null)
+                        _confidenceHoverLabel = Chart.DrawText("ConfidenceHoverTip", "", hit.time, hit.y, Color.White);
+
+                    _confidenceHoverLabel.Time = hit.time;
+                    _confidenceHoverLabel.Y = hit.y;
+                    _confidenceHoverLabel.Text = $"Confidence: {hit.pct:F0}%";
+                    _confidenceHoverLabel.IsHidden = false;
+                    return;
+                }
+            }
+
+            if (_confidenceHoverLabel != null)
+                _confidenceHoverLabel.IsHidden = true;
         }
 
         // A dot is only actionable once its pivot has been confirmed. Its
