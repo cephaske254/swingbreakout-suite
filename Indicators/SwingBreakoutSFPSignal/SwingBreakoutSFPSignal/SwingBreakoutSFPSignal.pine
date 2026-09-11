@@ -268,16 +268,19 @@ majorChanged = na(lastMajorCode) or majorCode != lastMajorCode
 minorChanged = na(lastMinorCode) or minorCode != lastMinorCode
 majorDot = showConfidenceDots and (not na(majorHigh) or not na(majorLow)) and majorChanged
 minorDot = showConfidenceDots and (not na(minorHigh) or not na(minorLow)) and minorChanged
+majorDotColor = majorCode == 1 ? color.new(color.lime, majorTransparency) : majorCode == -1 ? color.new(color.red, majorTransparency) : color.new(color.rgb(255, 179, 0), majorTransparency)
+minorDotColor = minorCode == 1 ? color.new(color.lime, minorTransparency) : minorCode == -1 ? color.new(color.red, minorTransparency) : color.new(color.rgb(255, 179, 0), minorTransparency)
+
+// Labels (not plotshape) so confidence can be shown as a hover tooltip,
+// matching the cTrader ChartIcon.Comment tooltip.
 if majorDot
     lastMajorCode := majorCode
+    majorY = not na(majorHigh) ? high[majorRight] + atr[majorRight] * 0.5 : low[majorRight] - atr[majorRight] * 0.5
+    label.new(bar_index - majorRight, majorY, "", style = label.style_diamond, size = size.normal, color = majorDotColor, tooltip = "Confidence: " + str.tostring(math.round(majorBuyPct)) + "%")
 if minorDot
     lastMinorCode := minorCode
-plotshape(majorDot and majorCode == 1, "Major Green Confidence", shape.diamond, location.belowbar, color.new(color.lime, majorTransparency), size = size.normal, offset = -majorRight)
-plotshape(majorDot and majorCode == -1, "Major Red Confidence", shape.diamond, location.abovebar, color.new(color.red, majorTransparency), size = size.normal, offset = -majorRight)
-plotshape(majorDot and majorCode == 0, "Major Amber Confidence", shape.diamond, location.abovebar, color.new(color.rgb(255, 179, 0), majorTransparency), size = size.normal, offset = -majorRight)
-plotshape(minorDot and minorCode == 1, "Minor Green Confidence", shape.circle, location.belowbar, color.new(color.lime, minorTransparency), size = size.tiny, offset = -swingRight)
-plotshape(minorDot and minorCode == -1, "Minor Red Confidence", shape.circle, location.abovebar, color.new(color.red, minorTransparency), size = size.tiny, offset = -swingRight)
-plotshape(minorDot and minorCode == 0, "Minor Amber Confidence", shape.circle, location.abovebar, color.new(color.rgb(255, 179, 0), minorTransparency), size = size.tiny, offset = -swingRight)
+    minorY = not na(minorHigh) ? high[swingRight] + atr[swingRight] * 0.5 : low[swingRight] - atr[swingRight] * 0.5
+    label.new(bar_index - swingRight, minorY, "", style = label.style_circle, size = size.tiny, color = minorDotColor, tooltip = "Confidence: " + str.tostring(math.round(minorBuyPct)) + "%")
 
 consolidationHigh = ta.highest(high, consolidationLookback)
 consolidationLow = ta.lowest(low, consolidationLookback)

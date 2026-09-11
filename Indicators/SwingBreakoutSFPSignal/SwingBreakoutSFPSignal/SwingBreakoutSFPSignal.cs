@@ -983,7 +983,8 @@ namespace cAlgo
                         double dotY = isPivotHigh ? Bars.HighPrices[candidate] + offset : Bars.LowPrices[candidate] - offset;
 
                         string dotName = "conf" + iconType + "Dot_" + candidate;
-                        Chart.DrawIcon(dotName, iconType, Bars.OpenTimes[candidate], dotY, dotColor);
+                        var dot = Chart.DrawIcon(dotName, iconType, Bars.OpenTimes[candidate], dotY, dotColor);
+                        dot.Comment = $"Confidence: {buyPctWindow:F0}%";
                     }
 
                     lastDotCode = code;
