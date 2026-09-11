@@ -68,17 +68,14 @@ f_window_buy_pct(length) =>
 atr = ta.atr(atrPeriod)
 threshold = minSweepAtr * atr
 
-// Daily values are requested independently of the chart timeframe.
-pdh = request.security(syminfo.tickerid, "D", high[1], lookahead = barmerge.lookahead_off)
-pdl = request.security(syminfo.tickerid, "D", low[1], lookahead = barmerge.lookahead_off)
-pdc = request.security(syminfo.tickerid, "D", close[1], lookahead = barmerge.lookahead_off)
-hcom = request.security(syminfo.tickerid, "D", f_month_high_close(), lookahead = barmerge.lookahead_off)
-lcom = request.security(syminfo.tickerid, "D", f_month_low_close(), lookahead = barmerge.lookahead_off)
+// Daily values are requested independently of the chart timeframe. Each
+// group is fetched as a single tuple call rather than one request.security
+// per value - same results, far fewer separate security contexts for
+// TradingView to maintain and recalculate.
+[pdh, pdl, pdc] = request.security(syminfo.tickerid, "D", [high[1], low[1], close[1]], lookahead = barmerge.lookahead_off)
+[hcom, lcom] = request.security(syminfo.tickerid, "D", [f_month_high_close(), f_month_low_close()], lookahead = barmerge.lookahead_off)
 
-htfClose = request.security(syminfo.tickerid, trendTimeframe, close, lookahead = barmerge.lookahead_off)
-htfSma20 = request.security(syminfo.tickerid, trendTimeframe, ta.sma(close, 20), lookahead = barmerge.lookahead_off)
-htfSma200 = request.security(syminfo.tickerid, trendTimeframe, ta.sma(close, 200), lookahead = barmerge.lookahead_off)
-htfAtr = request.security(syminfo.tickerid, trendTimeframe, ta.sma(ta.tr(true), atrPeriod), lookahead = barmerge.lookahead_off)
+[htfSma20, htfSma200, htfAtr] = request.security(syminfo.tickerid, trendTimeframe, [ta.sma(close, 20), ta.sma(close, 200), ta.sma(ta.tr(true), atrPeriod)], lookahead = barmerge.lookahead_off)
 
 trendBuy = not requireTrendFilter or (close > htfSma200 and htfSma20 > htfSma200 and math.abs(htfSma20 - htfSma200) >= htfAtr * 0.5)
 trendSell = not requireTrendFilter or (close < htfSma200 and htfSma20 < htfSma200 and math.abs(htfSma20 - htfSma200) >= htfAtr * 0.5)
@@ -313,12 +310,16 @@ var array<label> majorDotLabels = array.new<label>()
 var array<label> minorDotLabels = array.new<label>()
 var int lastMajorCode = na
 var int lastMinorCode = na
-majorBuyPct = f_window_buy_pct(majorRight)
-minorBuyPct = f_window_buy_pct(swingRight)
-majorCode = majorBuyPct >= 70 ? 1 : majorBuyPct <= 30 ? -1 : 0
-minorCode = minorBuyPct >= 70 ? 1 : minorBuyPct <= 30 ? -1 : 0
-majorTransparency = int(math.round(80 - math.min(math.abs(majorBuyPct - 50.0) / 50.0, 1.0) * 80))
-minorTransparency = int(math.round(80 - math.min(math.abs(minorBuyPct - 50.0) / 50.0, 1.0) * 80))
+// f_window_buy_pct loops over its window (O(majorRight)/O(swingRight) per
+// call) - only worth paying for on the rare bar a pivot actually confirms,
+// not every bar. Pine's ?: only evaluates the taken branch (unlike and/or,
+// which are eager), so this genuinely skips the loop otherwise.
+majorBuyPct = (not na(majorHigh) or not na(majorLow)) ? f_window_buy_pct(majorRight) : na
+minorBuyPct = (not na(minorHigh) or not na(minorLow)) ? f_window_buy_pct(swingRight) : na
+majorCode = na(majorBuyPct) ? 0 : (majorBuyPct >= 70 ? 1 : majorBuyPct <= 30 ? -1 : 0)
+minorCode = na(minorBuyPct) ? 0 : (minorBuyPct >= 70 ? 1 : minorBuyPct <= 30 ? -1 : 0)
+majorTransparency = na(majorBuyPct) ? 100 : int(math.round(80 - math.min(math.abs(majorBuyPct - 50.0) / 50.0, 1.0) * 80))
+minorTransparency = na(minorBuyPct) ? 100 : int(math.round(80 - math.min(math.abs(minorBuyPct - 50.0) / 50.0, 1.0) * 80))
 majorChanged = na(lastMajorCode) or majorCode != lastMajorCode
 minorChanged = na(lastMinorCode) or minorCode != lastMinorCode
 majorDot = showConfidenceDots and (not na(majorHigh) or not na(majorLow)) and majorChanged
