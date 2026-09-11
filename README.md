@@ -8,9 +8,11 @@ sequence, split into a pure signal indicator and an execution robot:
 - **`Indicators/SwingBreakoutSFPSignal/`** — the indicator. Detects SFP and
   B&R reactions at PDH/PDL/PDC, month-to-date close highs/lows, and swing
   highs/lows; runs the A-B-C-D entry sequence; applies an SMA trend-regime
-  filter; and identifies consolidation from a compressed, low-efficiency
-  rolling range. No order or position logic. See `STRATEGY.md` for the full
-  method with diagrams.
+  filter; and identifies consolidation from ADX compression. Neither entry
+  signal ever fires while price is inside a consolidation range, unless it's
+  a same-direction retest of a box the range already broke out of — see
+  [Consolidation filter](#consolidation-filter). No order or position logic.
+  See `STRATEGY.md` for the full method with diagrams.
 - **`Robots/Swingbreakouttrader/`** — the execution robot. Drives the
   indicator via `Indicators.GetIndicator<SwingBreakoutSFPSignal>(...)` and
   handles only trade management: sizing, stop/target placement (taken
@@ -18,8 +20,9 @@ sequence, split into a pure signal indicator and an execution robot:
   filters (spread, session, clustering, opposite-direction blocking). Its
   opt-in **Enable Confidence Mode** treats a confirmed green confidence dot
   as a buy signal and a red dot as a sell signal; dot entries use the
-  pivot-to-confirmation range as their stop and a 2R target. It always
-  rejects new entries while the indicator identifies consolidation.
+  pivot-to-confirmation range as their stop and a 2R target. It also blocks
+  any entry while the indicator reports an active consolidation, as a
+  second line of defense behind the indicator's own filter.
 
 ## Build
 
@@ -128,15 +131,30 @@ available volume data differs.
 
 ## Consolidation filter
 
-The cTrader robot always blocks new entries while the indicator marks a
-consolidation. A consolidation begins when ADX is below `Consolidation Max
-ADX` (17 by default) and becomes active only after `Consolidation Min. Bars`
-(15 by default) remain below that threshold.
+A consolidation begins when ADX is below `Consolidation Max ADX` (17 by
+default) and becomes active only after `Consolidation Min. Bars` (15 by
+default) remain below that threshold. While ADX remains below the
+threshold, the indicator tracks and displays the range's high, low, and
+midpoint; a rise back above the threshold ends the range.
 
-While ADX remains below the threshold, the indicator tracks and displays the
-range high, low, and midpoint. A rise back above the threshold clears the
-range. The Pine indicator uses the same visual classification but, as an
-indicator, does not place or block trades.
+Neither `BullishSignal`/`BearishSignal` (the SFP/B&R entry) nor
+`ConfidenceBuySignal`/`ConfidenceSellSignal` (the robot's opt-in Confidence
+Mode entry) ever fires while a consolidation is active — there is no
+"retest" exception during the range itself, since nothing has broken out of
+it yet.
+
+Once a range ends, the indicator keeps that box's bounds and which side
+price closed out of it on. A later entry with its trigger price still
+inside that box is allowed only if the entry direction matches the
+breakout side (buying above a range that broke up, selling below one that
+broke down) — a genuine breakout retest. An entry in the box that doesn't
+match the breakout side (or before any breakout direction is known) is
+still blocked. Once price is clear of the old box entirely, none of this
+applies. This is computed once, inside the indicator, so both entry types
+and both platforms (cTrader and TradingView Pine) apply it identically; the
+cTrader robot's own `ConsolidationActive` check in `TryEnter` is a second,
+redundant line of defense that only ever fires during an active range,
+never during a retest.
 
 ## Parameter defaults
 

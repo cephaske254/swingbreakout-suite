@@ -155,6 +155,56 @@ else
         bearishBreak := lcom
     bearishPendingLevel := bearishBreak
 
+// Computed before the A-B-C-D state machine below, since entry firing
+// reads this same bar's consolidation box state.
+[_, _, consolidationAdx] = ta.dmi(consolidationAdxPeriod, consolidationAdxPeriod)
+lowAdx = consolidationAdx < consolidationMaxAdx
+var int consolidationStart = na
+var float consolidationHigh = na
+var float consolidationLow = na
+if lowAdx
+    if not lowAdx[1]
+        consolidationStart := bar_index
+        consolidationHigh := high
+        consolidationLow := low
+    else
+        consolidationHigh := math.max(consolidationHigh, high)
+        consolidationLow := math.min(consolidationLow, low)
+else
+    consolidationStart := na
+    consolidationHigh := na
+    consolidationLow := na
+consolidating = lowAdx and not na(consolidationStart) and bar_index - consolidationStart + 1 >= consolidationMinBars
+
+// The most recently confirmed consolidation box's bounds, held even after
+// price breaks out of it, and which side it broke out on - reset only when
+// the NEXT consolidation is confirmed. Lets an entry tell "inside old chop"
+// apart from "retest of a box we already broke out of".
+var float consolBoxHigh = na
+var float consolBoxLow = na
+var int consolBoxBrokenDir = 0
+if consolidating
+    consolBoxHigh := consolidationHigh
+    consolBoxLow := consolidationLow
+    consolBoxBrokenDir := 0
+else if not na(consolBoxHigh)
+    if close > consolBoxHigh
+        consolBoxBrokenDir := 1
+    else if close < consolBoxLow
+        consolBoxBrokenDir := -1
+
+// Never enter inside a consolidation box - unless the entry direction
+// matches the side the box was already broken out on (a breakout retest,
+// not a trade inside the chop).
+f_consolidation_blocks_entry(dir, entryPrice) =>
+    blocked = false
+    if consolidating
+        blocked := true
+    else if not na(consolBoxHigh) and entryPrice <= consolBoxHigh and entryPrice >= consolBoxLow
+        isRetest = (dir == 1 and consolBoxBrokenDir > 0) or (dir == -1 and consolBoxBrokenDir < 0)
+        blocked := not isRetest
+    blocked
+
 // A-B-C-D state machine: 0 idle, 1 B, 2 C, 3 extension, 4 D, 5 entry.
 var int bullState = 0
 var int bearState = 0
@@ -203,7 +253,7 @@ else if bullState != 0
         bullD := pivotHigh
         bullState := 5
         bullPhaseStart := bar_index - swingRight
-    else if bullState == 5 and low <= (bullD + bullC) / 2 and trendBuy
+    else if bullState == 5 and low <= (bullD + bullC) / 2 and trendBuy and not f_consolidation_blocks_entry(1, (bullD + bullC) / 2)
         bullishSignal := true
         stopAnchor := stopMode == "Conservative" ? bullC : bullA
         targetLevel := bullC + (bullD - bullC) * 2.618
@@ -239,7 +289,7 @@ else if bearState != 0
         bearD := pivotLow
         bearState := 5
         bearPhaseStart := bar_index - swingRight
-    else if bearState == 5 and high >= (bearD + bearC) / 2 and trendSell
+    else if bearState == 5 and high >= (bearD + bearC) / 2 and trendSell and not f_consolidation_blocks_entry(-1, (bearD + bearC) / 2)
         bearishSignal := true
         stopAnchor := stopMode == "Conservative" ? bearC : bearA
         targetLevel := bearC + (bearD - bearC) * 2.618
@@ -283,24 +333,6 @@ if minorDot
     minorY = not na(minorHigh) ? high[swingRight] + atr[swingRight] * 0.5 : low[swingRight] - atr[swingRight] * 0.5
     label.new(bar_index - swingRight, minorY, "", style = label.style_circle, size = size.tiny, color = minorDotColor, tooltip = "Confidence: " + str.tostring(math.round(minorBuyPct)) + "%")
 
-[_, _, consolidationAdx] = ta.dmi(consolidationAdxPeriod, consolidationAdxPeriod)
-lowAdx = consolidationAdx < consolidationMaxAdx
-var int consolidationStart = na
-var float consolidationHigh = na
-var float consolidationLow = na
-if lowAdx
-    if not lowAdx[1]
-        consolidationStart := bar_index
-        consolidationHigh := high
-        consolidationLow := low
-    else
-        consolidationHigh := math.max(consolidationHigh, high)
-        consolidationLow := math.min(consolidationLow, low)
-else
-    consolidationStart := na
-    consolidationHigh := na
-    consolidationLow := na
-consolidating = lowAdx and not na(consolidationStart) and bar_index - consolidationStart + 1 >= consolidationMinBars
 consolidationMid = (consolidationHigh + consolidationLow) / 2
 consolidationTop = plot(highlightConsolidation and consolidating ? consolidationHigh : na, "Consolidation Top", color = color.new(color.orange, 25), style = plot.style_linebr)
 consolidationBottom = plot(highlightConsolidation and consolidating ? consolidationLow : na, "Consolidation Bottom", color = color.new(color.lime, 25), style = plot.style_linebr)

@@ -253,6 +253,16 @@ namespace cAlgo
         private IndicatorDataSeries _consolRunHigh;
         private IndicatorDataSeries _consolRunLow;
 
+        // The most recently confirmed consolidation box's bounds, held even
+        // after price breaks out of it (unlike _consolRunHigh/Low, which go
+        // NaN the moment the box stops being active) - and which side price
+        // broke out on. Both reset only when the NEXT consolidation is
+        // confirmed. Lets an entry tell "inside old chop" apart from "retest
+        // of a box we already broke out of" - see ConsolidationBlocksEntry.
+        private IndicatorDataSeries _consolBoxHigh;
+        private IndicatorDataSeries _consolBoxLow;
+        private IndicatorDataSeries _consolBoxBrokenDir;
+
         // B&R pending-break tracking, per direction (index 0 = bullish,
         // index 1 = bearish). A single tracker per direction, not per level
         // type - the first enabled level whose break condition fires arms
@@ -316,6 +326,9 @@ namespace cAlgo
             _consolRunStart = CreateDataSeries();
             _consolRunHigh = CreateDataSeries();
             _consolRunLow = CreateDataSeries();
+            _consolBoxHigh = CreateDataSeries();
+            _consolBoxLow = CreateDataSeries();
+            _consolBoxBrokenDir = CreateDataSeries();
 
             for (int i = 0; i < 2; i++)
             {
@@ -458,6 +471,10 @@ namespace cAlgo
             bool bullishTriggered = bullishSFP || bullishBnR;
             bool bearishTriggered = bearishSFP || bearishBnR;
 
+            // Computed before the A-B-C-D sequence below, since entry firing
+            // reads this same bar's consolidation box state.
+            UpdateConsolidationState(index);
+
             // === STEP 2: A-B-C-D sequence per direction, independently. ===
             ProcessSequence(0, 1, index, bullishTriggered, barHigh, barLow, barClose, BullishSignal);
             ProcessSequence(1, -1, index, bearishTriggered, barHigh, barLow, barClose, BearishSignal);
@@ -468,8 +485,6 @@ namespace cAlgo
                 Chart.DrawIcon("SFPBull" + index, ChartIconType.Circle, index, barLow - atrVal * 0.3, BullColor);
 
             UpdateConfidenceDots(index);
-
-            UpdateConsolidationState(index);
         }
 
         // Single pending-break tracker for `dir` (bullish=1, bearish=-1).
@@ -665,7 +680,7 @@ namespace cAlgo
                 {
                     double entryPrice = (d + c) / 2.0;
                     bool touched = dir == 1 ? barLow <= entryPrice : barHigh >= entryPrice;
-                    if (touched && TrendFilterOK(dir, index))
+                    if (touched && TrendFilterOK(dir, index) && !ConsolidationBlocksEntry(dir, index, entryPrice))
                     {
                         signalSeries[index] = 1;
                         StopAnchor[index] = StopMode == StopLossMode.Conservative ? c : a;
@@ -892,6 +907,53 @@ namespace cAlgo
             _consolRunStart[index] = isCandidate ? runStart : double.NaN;
             _consolRunHigh[index] = isCandidate ? runHigh : double.NaN;
             _consolRunLow[index] = isCandidate ? runLow : double.NaN;
+
+            double boxHigh = index > 0 ? _consolBoxHigh[index - 1] : double.NaN;
+            double boxLow = index > 0 ? _consolBoxLow[index - 1] : double.NaN;
+            double boxBrokenDir = index > 0 ? _consolBoxBrokenDir[index - 1] : 0;
+
+            if (isConsolidating)
+            {
+                // Still ranging - the box IS the current run, no breakout yet.
+                boxHigh = runHigh;
+                boxLow = runLow;
+                boxBrokenDir = 0;
+            }
+            else if (!double.IsNaN(boxHigh))
+            {
+                if (Bars.ClosePrices[index] > boxHigh)
+                    boxBrokenDir = 1;
+                else if (Bars.ClosePrices[index] < boxLow)
+                    boxBrokenDir = -1;
+                // else: still inside/near the old box or already broken out
+                // earlier - keep the prior side.
+            }
+
+            _consolBoxHigh[index] = boxHigh;
+            _consolBoxLow[index] = boxLow;
+            _consolBoxBrokenDir[index] = boxBrokenDir;
+        }
+
+        // Never enter inside a consolidation box - unless the entry direction
+        // matches the side the box was already broken out on, which makes it
+        // a breakout retest rather than a trade inside the chop.
+        private bool ConsolidationBlocksEntry(int dir, int index, double entryPrice)
+        {
+            if (ConsolidationActive[index] > 0.5)
+                return true; // still actively ranging - nothing is a "retest" yet
+
+            double boxHigh = _consolBoxHigh[index];
+            double boxLow = _consolBoxLow[index];
+            if (double.IsNaN(boxHigh) || double.IsNaN(boxLow))
+                return false; // no consolidation history near this entry
+
+            bool insideBox = entryPrice <= boxHigh && entryPrice >= boxLow;
+            if (!insideBox)
+                return false;
+
+            double brokenDir = _consolBoxBrokenDir[index];
+            bool isRetest = (dir == 1 && brokenDir > 0) || (dir == -1 && brokenDir < 0);
+            return !isRetest;
         }
 
         // =====================================================================
@@ -1028,13 +1090,13 @@ namespace cAlgo
                 high = Math.Max(high, Bars.HighPrices[i]);
             }
 
-            if (code == 1 && low < entry)
+            if (code == 1 && low < entry && !ConsolidationBlocksEntry(1, index, entry))
             {
                 ConfidenceBuySignal[index] = 1;
                 ConfidenceStopAnchor[index] = low;
                 ConfidenceTargetLevel[index] = entry + (entry - low) * 2.0;
             }
-            else if (code == -1 && high > entry)
+            else if (code == -1 && high > entry && !ConsolidationBlocksEntry(-1, index, entry))
             {
                 ConfidenceSellSignal[index] = 1;
                 ConfidenceStopAnchor[index] = high;
