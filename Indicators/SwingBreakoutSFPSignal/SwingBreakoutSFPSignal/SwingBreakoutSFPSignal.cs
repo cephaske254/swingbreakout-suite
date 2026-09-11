@@ -145,6 +145,26 @@ namespace cAlgo
         public int MajorSwingRightBars { get; set; }
         // === End of Confidence Dots =============================================
 
+        // === Consolidation Highlight - visual/diagnostic only, NOT part of ===
+        // === shared config/GetIndicator<T>(...) - the Robot never reads    ===
+        // === this and it does not affect BullishSignal/BearishSignal/      ===
+        // === StopAnchor/TargetLevel in any way.                            ===
+        // Shades a translucent rectangle over any run of bars whose rolling
+        // ConsolidationLookbackBars-bar high/low range stays within
+        // ConsolidationRangeATRmult x ATR - i.e. price going nowhere. Purely
+        // a backtest-review aid: overlay this on a chart of trade markers to
+        // see whether losing/no-signal stretches cluster in ranging
+        // conditions rather than trending ones.
+        [Parameter("Highlight Consolidation (visual only)", DefaultValue = true, Group = "Consolidation Highlight")]
+        public bool HighlightConsolidation { get; set; }
+
+        [Parameter("Consolidation Lookback (bars)", DefaultValue = 20, MinValue = 5, MaxValue = 200, Group = "Consolidation Highlight")]
+        public int ConsolidationLookbackBars { get; set; }
+
+        [Parameter("Consolidation Max Range (x ATR)", DefaultValue = 1.5, MinValue = 0.1, Step = 0.1, Group = "Consolidation Highlight")]
+        public double ConsolidationRangeATRmult { get; set; }
+        // === End of Consolidation Highlight ======================================
+
         // Internal-only tuning, not shared with the bot - edit directly for
         // a different value. Used by the trend filter, against the
         // HIGHER-timeframe ATR (see ComputeAtr/_htfSma20/_htfSma200) - not
@@ -177,6 +197,7 @@ namespace cAlgo
         private static readonly Color BreakoutColor = Color.FromArgb(255, 255, 165, 0);
         private static readonly Color SwingLowLineColor = Color.FromArgb(160, 0, 200, 120);
         private static readonly Color SwingHighLineColor = Color.FromArgb(160, 220, 60, 60);
+        private static readonly Color ConsolidationColor = Color.FromArgb(45, 255, 193, 7);
 
         [Output("Bullish Signal", LineColor = "Transparent")]
         public IndicatorDataSeries BullishSignal { get; set; }
@@ -209,6 +230,15 @@ namespace cAlgo
         private IndicatorDataSeries _lastSwingLowBarSeries;
         private IndicatorDataSeries _swingHighBrokenSeries;
         private IndicatorDataSeries _swingLowBrokenSeries;
+
+        // Consolidation Highlight state - see that parameter group's
+        // comment and UpdateConsolidationHighlight below. _consolRunHigh/Low
+        // carry the running high/low of the CURRENT active run so extending
+        // it stays O(1) per bar instead of rescanning the whole run.
+        private IndicatorDataSeries _consolActive;
+        private IndicatorDataSeries _consolRunStart;
+        private IndicatorDataSeries _consolRunHigh;
+        private IndicatorDataSeries _consolRunLow;
 
         // B&R pending-break tracking, per direction (index 0 = bullish,
         // index 1 = bearish). A single tracker per direction, not per level
@@ -254,6 +284,11 @@ namespace cAlgo
             _lastSwingHighSeries = CreateDataSeries();
             _lastSwingLowSeries = CreateDataSeries();
             _lastSwingHighBarSeries = CreateDataSeries();
+            _consolActive = CreateDataSeries();
+            _consolRunStart = CreateDataSeries();
+            _consolRunHigh = CreateDataSeries();
+            _consolRunLow = CreateDataSeries();
+
             _lastSwingLowBarSeries = CreateDataSeries();
             _swingHighBrokenSeries = CreateDataSeries();
             _swingLowBrokenSeries = CreateDataSeries();
@@ -398,6 +433,11 @@ namespace cAlgo
 
             if (BearishSignal[index] > 0.5)
                 Chart.DrawIcon("SFPBear" + index, ChartIconType.Circle, index, barHigh + atrVal * 0.3, BearColor);
+            // === Consolidation Highlight - purely visual, independent of ==
+            // === the signal/stop/target outputs above. ====================
+            if (HighlightConsolidation)
+                UpdateConsolidationHighlight(index, atrVal);
+
             if (BullishSignal[index] > 0.5)
                 Chart.DrawIcon("SFPBull" + index, ChartIconType.Circle, index, barLow - atrVal * 0.3, BullColor);
 
@@ -782,6 +822,75 @@ namespace cAlgo
                 if (i == centerIndex) continue;
                 if (Bars.LowPrices[i] <= centerLow) return false;
             }
+        // =====================================================================
+        // Consolidation Highlight - shades a translucent rectangle over any
+        // run of bars whose rolling ConsolidationLookbackBars-bar high/low
+        // range stays within ConsolidationRangeATRmult x ATR. See the
+        // "Consolidation Highlight" parameter group comment for why this
+        // exists - it's a backtest-review aid, not a trading filter.
+        // =====================================================================
+
+        // Runs a candidate consolidation window fresh (O(lookback)) only at
+        // the START of a run; while a run continues, extends its high/low in
+        // O(1) using the persisted _consolRunHigh/_consolRunLow instead of
+        // rescanning the whole run every bar.
+        private void UpdateConsolidationHighlight(int index, double atrVal)
+        {
+            bool prevActive = index > 0 && _consolActive[index - 1] > 0.5;
+            double runStart = index > 0 ? _consolRunStart[index - 1] : double.NaN;
+            double runHigh = index > 0 ? _consolRunHigh[index - 1] : double.NaN;
+            double runLow = index > 0 ? _consolRunLow[index - 1] : double.NaN;
+
+            bool isConsolidating = false;
+
+            if (index >= ConsolidationLookbackBars - 1 && !double.IsNaN(atrVal) && atrVal > 0)
+            {
+                if (!prevActive)
+                {
+                    double hi = double.NegativeInfinity, lo = double.PositiveInfinity;
+                    for (int i = index - ConsolidationLookbackBars + 1; i <= index; i++)
+                    {
+                        if (Bars.HighPrices[i] > hi) hi = Bars.HighPrices[i];
+                        if (Bars.LowPrices[i] < lo) lo = Bars.LowPrices[i];
+                    }
+
+                    if (hi - lo <= ConsolidationRangeATRmult * atrVal)
+                    {
+                        isConsolidating = true;
+                        runStart = index - ConsolidationLookbackBars + 1;
+                        runHigh = hi;
+                        runLow = lo;
+                    }
+                }
+                else
+                {
+                    double candidateHigh = Math.Max(runHigh, Bars.HighPrices[index]);
+                    double candidateLow = Math.Min(runLow, Bars.LowPrices[index]);
+
+                    if (candidateHigh - candidateLow <= ConsolidationRangeATRmult * atrVal)
+                    {
+                        isConsolidating = true;
+                        runHigh = candidateHigh;
+                        runLow = candidateLow;
+                    }
+                    // else: range grew past the threshold - the run ends here.
+                    // The rectangle already drawn for it is left as-is (final
+                    // shape); a fresh run starting later gets its own name.
+                }
+            }
+
+            if (isConsolidating)
+            {
+                var rect = Chart.DrawRectangle("Consolidation_" + (int)runStart, (int)runStart, runHigh, index, runLow, ConsolidationColor);
+                rect.IsFilled = true;
+            }
+
+            _consolActive[index] = isConsolidating ? 1 : 0;
+            _consolRunStart[index] = isConsolidating ? runStart : double.NaN;
+            _consolRunHigh[index] = isConsolidating ? runHigh : double.NaN;
+            _consolRunLow[index] = isConsolidating ? runLow : double.NaN;
+        }
+
             return true;
         }
 
