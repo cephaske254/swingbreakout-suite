@@ -30,7 +30,7 @@ majorRight = input.int(15, "Major Swing Lookback - Right Bars", minval = 1, maxv
 
 highlightConsolidation = input.bool(true, "Highlight Consolidation", group = groupConsolidation)
 consolidationLookback = input.int(20, "Consolidation Lookback (bars)", minval = 5, maxval = 200, group = groupConsolidation)
-consolidationRangeAtr = input.float(1.5, "Consolidation Max Range (x ATR)", minval = 0.1, step = 0.1, group = groupConsolidation)
+consolidationRangeAtr = input.float(4.0, "Consolidation Max Range (x ATR)", minval = 0.1, step = 0.1, group = groupConsolidation)
 
 f_month_high_close() =>
     var float result = na
@@ -284,7 +284,10 @@ if minorDot
 
 consolidationHigh = ta.highest(high, consolidationLookback)
 consolidationLow = ta.lowest(low, consolidationLookback)
-consolidating = bar_index >= consolidationLookback - 1 and consolidationHigh - consolidationLow <= consolidationRangeAtr * atr
+consolidationRange = consolidationHigh - consolidationLow
+consolidationNetMove = math.abs(close - close[consolidationLookback - 1])
+consolidationEfficiency = consolidationRange > 0 ? consolidationNetMove / consolidationRange : 0
+consolidating = bar_index >= consolidationLookback - 1 and consolidationRange <= consolidationRangeAtr * atr and consolidationEfficiency <= 0.35
 bgcolor(highlightConsolidation and consolidating ? color.new(color.rgb(255, 193, 7), 82) : na, title = "Consolidation")
 
 alertcondition(bullishSignal, "Bullish SFP / B&R Entry", "Bullish SFP / B&R entry on {{ticker}}")

@@ -148,23 +148,17 @@ namespace cAlgo
         public int MajorSwingRightBars { get; set; }
         // === End of Confidence Dots =============================================
 
-        // === Consolidation Highlight - visual/diagnostic only, NOT part of ===
-        // === shared config/GetIndicator<T>(...) - the Robot never reads    ===
-        // === this and it does not affect BullishSignal/BearishSignal/      ===
-        // === StopAnchor/TargetLevel in any way.                            ===
-        // Shades a translucent rectangle over any run of bars whose rolling
-        // ConsolidationLookbackBars-bar high/low range stays within
-        // ConsolidationRangeATRmult x ATR - i.e. price going nowhere. Purely
-        // a backtest-review aid: overlay this on a chart of trade markers to
-        // see whether losing/no-signal stretches cluster in ranging
-        // conditions rather than trending ones.
+        // === Consolidation detection is execution-relevant but not shared ===
+        // === via GetIndicator<T>(); the Robot reads its output directly.  ===
+        // A range is consolidated when its rolling high-low span is compact
+        // relative to ATR and its net movement uses little of that span.
         [Parameter("Highlight Consolidation (visual only)", DefaultValue = true, Group = "Consolidation Highlight")]
         public bool HighlightConsolidation { get; set; }
 
         [Parameter("Consolidation Lookback (bars)", DefaultValue = 20, MinValue = 5, MaxValue = 200, Group = "Consolidation Highlight")]
         public int ConsolidationLookbackBars { get; set; }
 
-        [Parameter("Consolidation Max Range (x ATR)", DefaultValue = 1.5, MinValue = 0.1, Step = 0.1, Group = "Consolidation Highlight")]
+        [Parameter("Consolidation Max Range (x ATR)", DefaultValue = 4.0, MinValue = 0.1, Step = 0.1, Group = "Consolidation Highlight")]
         public double ConsolidationRangeATRmult { get; set; }
         // === End of Consolidation Highlight ======================================
 
@@ -174,6 +168,7 @@ namespace cAlgo
         // the chart's own _atr, since the SMAs it measures the separation
         // of live on that longer horizon too.
         private const double TrendSeparationATRmult = 0.5;
+        private const double ConsolidationMaxDirectionalEfficiency = 0.35;
 
         // 261.8% extension ratio used for TargetLevel - see STRATEGY.md.
         private const double TargetExtensionRatio = 2.618;
@@ -221,6 +216,9 @@ namespace cAlgo
 
         [Output("Confidence Target", LineColor = "Transparent")]
         public IndicatorDataSeries ConfidenceTargetLevel { get; set; }
+
+        [Output("Consolidation Active", LineColor = "Transparent")]
+        public IndicatorDataSeries ConsolidationActive { get; set; }
 
         private AverageTrueRange _atr;
         // Trend filter SMAs - deliberately computed on the HIGHER
@@ -344,6 +342,7 @@ namespace cAlgo
             ConfidenceSellSignal[index] = 0;
             ConfidenceStopAnchor[index] = double.NaN;
             ConfidenceTargetLevel[index] = double.NaN;
+            ConsolidationActive[index] = 0;
 
             double lastSwingHigh = index > 0 ? _lastSwingHighSeries[index - 1] : double.NaN;
             double lastSwingLow = index > 0 ? _lastSwingLowSeries[index - 1] : double.NaN;
@@ -464,10 +463,7 @@ namespace cAlgo
 
             UpdateConfidenceDots(index);
 
-            // === Consolidation Highlight - purely visual, independent of ==
-            // === the signal/stop/target outputs above. ====================
-            if (HighlightConsolidation)
-                UpdateConsolidationHighlight(index, atrVal);
+            UpdateConsolidationState(index, atrVal);
         }
 
         // Single pending-break tracker for `dir` (bullish=1, bearish=-1).
@@ -849,18 +845,12 @@ namespace cAlgo
         }
 
         // =====================================================================
-        // Consolidation Highlight - shades a translucent rectangle over any
-        // run of bars whose rolling ConsolidationLookbackBars-bar high/low
-        // range stays within ConsolidationRangeATRmult x ATR. See the
-        // "Consolidation Highlight" parameter group comment for why this
-        // exists - it's a backtest-review aid, not a trading filter.
+        // Consolidation detection evaluates every bar against a fresh rolling
+        // window. The range threshold finds compression; the directional
+        // efficiency threshold excludes a steady, narrow trend.
         // =====================================================================
 
-        // Runs a candidate consolidation window fresh (O(lookback)) only at
-        // the START of a run; while a run continues, extends its high/low in
-        // O(1) using the persisted _consolRunHigh/_consolRunLow instead of
-        // rescanning the whole run every bar.
-        private void UpdateConsolidationHighlight(int index, double atrVal)
+        private void UpdateConsolidationState(int index, double atrVal)
         {
             bool prevActive = index > 0 && _consolActive[index - 1] > 0.5;
             double runStart = index > 0 ? _consolRunStart[index - 1] : double.NaN;
@@ -871,46 +861,44 @@ namespace cAlgo
 
             if (index >= ConsolidationLookbackBars - 1 && !double.IsNaN(atrVal) && atrVal > 0)
             {
-                if (!prevActive)
+                double rollingHigh = double.NegativeInfinity;
+                double rollingLow = double.PositiveInfinity;
+                int windowStart = index - ConsolidationLookbackBars + 1;
+                for (int i = windowStart; i <= index; i++)
                 {
-                    double hi = double.NegativeInfinity, lo = double.PositiveInfinity;
-                    for (int i = index - ConsolidationLookbackBars + 1; i <= index; i++)
-                    {
-                        if (Bars.HighPrices[i] > hi) hi = Bars.HighPrices[i];
-                        if (Bars.LowPrices[i] < lo) lo = Bars.LowPrices[i];
-                    }
-
-                    if (hi - lo <= ConsolidationRangeATRmult * atrVal)
-                    {
-                        isConsolidating = true;
-                        runStart = index - ConsolidationLookbackBars + 1;
-                        runHigh = hi;
-                        runLow = lo;
-                    }
+                    rollingHigh = Math.Max(rollingHigh, Bars.HighPrices[i]);
+                    rollingLow = Math.Min(rollingLow, Bars.LowPrices[i]);
                 }
-                else
-                {
-                    double candidateHigh = Math.Max(runHigh, Bars.HighPrices[index]);
-                    double candidateLow = Math.Min(runLow, Bars.LowPrices[index]);
 
-                    if (candidateHigh - candidateLow <= ConsolidationRangeATRmult * atrVal)
+                double range = rollingHigh - rollingLow;
+                double netMove = Math.Abs(Bars.ClosePrices[index] - Bars.ClosePrices[windowStart]);
+                double directionalEfficiency = range > 0 ? netMove / range : 0;
+                isConsolidating = range <= ConsolidationRangeATRmult * atrVal
+                    && directionalEfficiency <= ConsolidationMaxDirectionalEfficiency;
+
+                if (isConsolidating)
+                {
+                    if (!prevActive)
                     {
-                        isConsolidating = true;
-                        runHigh = candidateHigh;
-                        runLow = candidateLow;
+                        runStart = windowStart;
+                        runHigh = rollingHigh;
+                        runLow = rollingLow;
                     }
-                    // else: range grew past the threshold - the run ends here.
-                    // The rectangle already drawn for it is left as-is (final
-                    // shape); a fresh run starting later gets its own name.
+                    else
+                    {
+                        runHigh = Math.Max(runHigh, rollingHigh);
+                        runLow = Math.Min(runLow, rollingLow);
+                    }
                 }
             }
 
-            if (isConsolidating)
+            if (isConsolidating && HighlightConsolidation)
             {
                 var rect = Chart.DrawRectangle("Consolidation_" + (int)runStart, (int)runStart, runHigh, index, runLow, ConsolidationColor);
                 rect.IsFilled = true;
             }
 
+            ConsolidationActive[index] = isConsolidating ? 1 : 0;
             _consolActive[index] = isConsolidating ? 1 : 0;
             _consolRunStart[index] = isConsolidating ? runStart : double.NaN;
             _consolRunHigh[index] = isConsolidating ? runHigh : double.NaN;

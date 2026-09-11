@@ -8,7 +8,8 @@ sequence, split into a pure signal indicator and an execution robot:
 - **`Indicators/SwingBreakoutSFPSignal/`** — the indicator. Detects SFP and
   B&R reactions at PDH/PDL/PDC, month-to-date close highs/lows, and swing
   highs/lows; runs the A-B-C-D entry sequence; applies an SMA trend-regime
-  filter. No order or position logic. See `STRATEGY.md` for the full
+  filter; and identifies consolidation from a compressed, low-efficiency
+  rolling range. No order or position logic. See `STRATEGY.md` for the full
   method with diagrams.
 - **`Robots/Swingbreakouttrader/`** — the execution robot. Drives the
   indicator via `Indicators.GetIndicator<SwingBreakoutSFPSignal>(...)` and
@@ -17,7 +18,8 @@ sequence, split into a pure signal indicator and an execution robot:
   filters (spread, session, clustering, opposite-direction blocking). Its
   opt-in **Enable Confidence Mode** treats a confirmed green confidence dot
   as a buy signal and a red dot as a sell signal; dot entries use the
-  pivot-to-confirmation range as their stop and a 2R target.
+  pivot-to-confirmation range as their stop and a 2R target. It always
+  rejects new entries while the indicator identifies consolidation.
 
 ## Build
 
@@ -123,6 +125,21 @@ The Pine version uses TradingView's chart-bar volume direction
 version can classify lower-timeframe tick-volume bars inside each chart bar,
 so confidence-dot colors can differ between the two platforms when their
 available volume data differs.
+
+## Consolidation filter
+
+The cTrader robot always blocks new entries while the indicator marks a
+consolidation. A consolidation requires both of the following across the
+last `Consolidation Lookback` bars (20 by default):
+
+- The high-low range is no more than `Consolidation Max Range` × ATR (4.0 by
+  default).
+- The absolute move from the first close to the latest close uses no more
+  than 35% of that range.
+
+The first condition detects compression; the second excludes a narrow but
+steadily directional move. The Pine indicator uses the same visual
+classification but, as an indicator, does not place or block trades.
 
 ## Parameter defaults
 

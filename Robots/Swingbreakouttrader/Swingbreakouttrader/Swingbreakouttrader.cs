@@ -383,6 +383,9 @@ namespace cAlgo
             if (!EnableTrading)
                 return;
 
+            if (_signal.ConsolidationActive[index] > 0.5)
+                return;
+
             if (double.IsNaN(stopLevel) || double.IsNaN(targetLevel))
                 return;
 
