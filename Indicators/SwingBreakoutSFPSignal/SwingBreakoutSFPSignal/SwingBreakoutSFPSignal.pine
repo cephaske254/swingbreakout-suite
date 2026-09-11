@@ -289,7 +289,7 @@ var int consolidationStart = na
 var float consolidationHigh = na
 var float consolidationLow = na
 if lowAdx
-    if not nz(lowAdx[1], false)
+    if not lowAdx[1]
         consolidationStart := bar_index
         consolidationHigh := high
         consolidationLow := low
