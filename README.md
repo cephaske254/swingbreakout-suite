@@ -1,6 +1,7 @@
 # SwingBreakout SFP/B&R Suite
 
-Two cTrader/cAlgo algos implementing an SFP (Swing Failure Pattern) / B&R
+**This is a [cTrader](https://ctrader.com) algo** - two cAlgo (cTrader's
+C#/.NET algo API) projects implementing an SFP (Swing Failure Pattern) / B&R
 (Break & Retest) trading method with an A-B-C-D fib-extension entry
 sequence, split into a pure signal indicator and an execution robot:
 
