@@ -368,7 +368,7 @@ namespace cAlgo
 
                 double slToSet = slImproves ? candidate.Value : position.StopLoss.Value;
                 double? tpToSet = trailingActive ? (double?)null : position.TakeProfit;
-                ModifyPosition(position, slToSet, tpToSet);
+                ModifyPosition(position, slToSet, tpToSet, ProtectionType.Absolute);
             }
         }
 
