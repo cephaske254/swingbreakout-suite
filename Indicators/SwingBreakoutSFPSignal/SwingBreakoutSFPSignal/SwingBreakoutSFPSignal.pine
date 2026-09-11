@@ -333,20 +333,20 @@ if minorDot
     minorY = not na(minorHigh) ? high[swingRight] + atr[swingRight] * 0.5 : low[swingRight] - atr[swingRight] * 0.5
     label.new(time[swingRight], minorY, "", xloc = xloc.bar_time, style = label.style_circle, size = size.tiny, color = minorDotColor, tooltip = "Confidence: " + str.tostring(math.round(minorBuyPct)) + "%")
 
-consolidationMid = (consolidationHigh + consolidationLow) / 2
-var int consolidationStartTime = na
-var box consolidationBox = na
+// Drawn ONCE, in full, the moment a run ends - not built up bar-by-bar by
+// mutating one persisted box object (that incremental box.set_right/
+// set_top/set_bottom-per-bar pattern, borrowed from the BigBeluga
+// consolidation template, was placing the box at the wrong price: its
+// setters don't reliably keep tracking a live-growing box under
+// xloc.bar_time the way its own line/label-based objects did). Using [1]
+// below reads the run's final bar - consolidationHigh/Low/lowAdx have
+// already reset for the CURRENT bar by the time consolidating flips false.
+var int consolStartTime = na
 if lowAdx and not lowAdx[1]
-    consolidationStartTime := time
-if not lowAdx
-    consolidationStartTime := na
-if highlightConsolidation and consolidating
-    if not consolidating[1]
-        consolidationBox := box.new(left = consolidationStartTime, top = consolidationHigh, right = time, bottom = consolidationLow, xloc = xloc.bar_time, border_color = color.new(color.orange, 25), bgcolor = color.new(color.orange, 88))
-    else
-        box.set_right(consolidationBox, time)
-        box.set_top(consolidationBox, consolidationHigh)
-        box.set_bottom(consolidationBox, consolidationLow)
+    consolStartTime := time
+
+if highlightConsolidation and not consolidating and consolidating[1]
+    box.new(left = consolStartTime, top = consolidationHigh[1], right = time[1], bottom = consolidationLow[1], xloc = xloc.bar_time, border_color = color.new(color.orange, 25), bgcolor = color.new(color.orange, 88))
 
 alertcondition(bullishSignal, "Bullish SFP / B&R Entry", "Bullish SFP / B&R entry on {{ticker}}")
 alertcondition(bearishSignal, "Bearish SFP / B&R Entry", "Bearish SFP / B&R entry on {{ticker}}")
