@@ -181,15 +181,11 @@ namespace cAlgo
         // comment for why these aren't [Parameter]s. Edit directly for a
         // different value.
         //
-        // ConfidenceNeutralBandPct widened (10 -> 40) and ShowAmberDots
-        // turned off (on request - "only in places that matter") so a dot
-        // only appears when volume delta at that swing was clearly
-        // lopsided (buyPct beyond 70%/below 30%), not on every pivot with a
-        // marginal lean. Combined with ConfidenceOnlyOnChange (unchanged),
-        // this is what "smooths" the dots down to the swings that actually
-        // carry conviction.
+        // A green/red dot requires buy volume above 70% or below 30%. Amber
+        // marks the neutral band. Opacity rises from 20% at neutral to 100%
+        // at full directional conviction.
         private const double ConfidenceNeutralBandPct = 40.0;
-        private const bool ConfidenceShowAmberDots = false;
+        private const bool ConfidenceShowAmberDots = true;
         private const bool ConfidenceOnlyOnChange = true;
         private const bool ConfidenceFadeByConviction = true;
         private const double ConfidenceDotOffsetATRmult = 0.5;
@@ -962,8 +958,11 @@ namespace cAlgo
                 if (amberFilterPass && (!ConfidenceOnlyOnChange || changed))
                 {
                     double conviction = Math.Min(Math.Abs(buyPctWindow - 50.0) / 50.0, 1.0);
+                    double opacityPct = ConfidenceFadeByConviction
+                        ? 20.0 + conviction * 80.0
+                        : 100.0;
                     int alpha = ConfidenceFadeByConviction
-                        ? (int)Math.Round(255.0 * (20.0 + conviction * 80.0) / 100.0)
+                        ? (int)Math.Round(255.0 * opacityPct / 100.0)
                         : 255;
                     alpha = Math.Max(0, Math.Min(255, alpha));
 
