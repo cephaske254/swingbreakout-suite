@@ -95,9 +95,14 @@ namespace cAlgo
     //     same-direction entry - stops a ranging market producing a string
     //     of small losses at nearly the same level.
     //
-    // TRADING SESSION (Session group): only acts on signals during the
-    // configured window (07:00-20:00 UTC by default, covering the London
-    // and New York sessions). TradeAllSessions removes the restriction.
+    // TRADING SESSION (Session group): only acts on signals whose A and D
+    // both fall within the New York session (13:00-22:00 UTC) by default,
+    // on the same calendar day. EnableLondonSession adds the London session
+    // (08:00-17:00 UTC) alongside it. Both windows are fixed UTC hours - an
+    // approximation that drifts about an hour off the true session with the
+    // US/UK daylight-saving change, since they don't change on the same
+    // dates. The indicator itself resets any in-progress A-B-C-D setup at a
+    // UTC day boundary, so A-D never spans two days.
     //
     // A handful of secondary knobs (whether multiple positions or
     // opposite-direction entries are ever allowed, breakeven buffer pips)
@@ -194,14 +199,12 @@ namespace cAlgo
         public double ClusterDistanceATRmult { get; set; }
 
         // === Trading session ====================================================
-        [Parameter("Trade all sessions (ignore the window below)", DefaultValue = true, Group = "Session")]
-        public bool TradeAllSessions { get; set; }
-
-        [Parameter("Session Start Hour (UTC)", DefaultValue = 7, MinValue = 0, MaxValue = 23, Group = "Session")]
-        public int SessionStartHourUTC { get; set; }
-
-        [Parameter("Session End Hour (UTC)", DefaultValue = 20, MinValue = 0, MaxValue = 23, Group = "Session")]
-        public int SessionEndHourUTC { get; set; }
+        // New York (13:00-22:00 UTC) always trades. London (08:00-17:00
+        // UTC) is optional. See NyStartHourUTC/NyEndHourUTC/
+        // LondonStartHourUTC/LondonEndHourUTC below to adjust the fixed
+        // windows themselves.
+        [Parameter("Enable London Session (adds 08:00-17:00 UTC alongside New York)", DefaultValue = false, Group = "Session")]
+        public bool EnableLondonSession { get; set; }
 
         // === Fixed internals =====================================================
         // One position per direction at a time, and no flipping into the
@@ -210,6 +213,14 @@ namespace cAlgo
         private const bool AllowMultiplePositions = false;
         private const bool BlockOppositeDirection = true;
         private const double BreakevenBufferPips = 1.0;
+
+        // Fixed UTC session windows - see WithinTradingSession. Edit these
+        // directly for a different window; not exposed as parameters since
+        // the user wants New York fixed and London as a single on/off.
+        private const int NyStartHourUTC = 13;
+        private const int NyEndHourUTC = 22;
+        private const int LondonStartHourUTC = 8;
+        private const int LondonEndHourUTC = 17;
 
         private const string Label = "SFPTrader";
         private const string TradingStatusChartObjectName = "SFPTrader_TradingStatus";
@@ -286,9 +297,9 @@ namespace cAlgo
                 return;
 
             if (_signal.BearishSignal[index] > 0.5)
-                TryEnter(-1, index, _signal.EntryLevel[index], _signal.StopAnchor[index], _signal.TargetLevel[index], _signal.OrderCancellationLevel[index]);
+                TryEnter(-1, index, _signal.EntryLevel[index], _signal.StopAnchor[index], _signal.TargetLevel[index], _signal.OrderCancellationLevel[index], _signal.ABar[index], _signal.DBar[index]);
             if (_signal.BullishSignal[index] > 0.5)
-                TryEnter(1, index, _signal.EntryLevel[index], _signal.StopAnchor[index], _signal.TargetLevel[index], _signal.OrderCancellationLevel[index]);
+                TryEnter(1, index, _signal.EntryLevel[index], _signal.StopAnchor[index], _signal.TargetLevel[index], _signal.OrderCancellationLevel[index], _signal.ABar[index], _signal.DBar[index]);
 
             _lastProcessedIndex = index;
         }
@@ -381,18 +392,27 @@ namespace cAlgo
         // ceiling, or R:R hierarchy layered on top. Always places a resting
         // limit order at entryLevel (E, the 50% D-C retracement) rather
         // than entering at market.
-        private void TryEnter(int dir, int index, double entryLevel, double stopLevel, double targetLevel, double cancellationLevel)
+        private void TryEnter(int dir, int index, double entryLevel, double stopLevel, double targetLevel, double cancellationLevel, double aBar, double dBar)
         {
             if (!EnableTrading)
                 return;
 
-            if (double.IsNaN(entryLevel) || double.IsNaN(stopLevel) || double.IsNaN(targetLevel) || double.IsNaN(cancellationLevel))
+            if (double.IsNaN(entryLevel) || double.IsNaN(stopLevel) || double.IsNaN(targetLevel) || double.IsNaN(cancellationLevel)
+                || double.IsNaN(aBar) || double.IsNaN(dBar))
                 return;
 
             if (SpreadTooWide())
                 return;
 
-            if (!WithinTradingSession(Bars.OpenTimes[index]))
+            // The whole A-D formation must have happened within one tradable
+            // session occurrence, not just the bar the signal happens to
+            // fire on (which can be well after D itself). The indicator
+            // already resets any in-progress setup at a UTC day boundary, so
+            // A and D landing in-session on the same day is guaranteed to
+            // mean the whole sequence did too.
+            DateTime aTime = Bars.OpenTimes[(int)aBar];
+            DateTime dTime = Bars.OpenTimes[(int)dBar];
+            if (!WithinTradingSession(aTime) || !WithinTradingSession(dTime) || aTime.Date != dTime.Date)
                 return;
 
             var tradeType = dir == 1 ? TradeType.Buy : TradeType.Sell;
@@ -516,23 +536,21 @@ namespace cAlgo
             return spreadPips > MaxSpreadPips;
         }
 
-        // London (~08:00-17:00 UTC) and New York (~13:00-22:00 UTC) overlap,
-        // so together they form one continuous window rather than two
-        // separate ones - hence a single Start/End pair rather than four
-        // parameters. Actual session hours shift with London/NY daylight
-        // saving (which don't change on the same dates), so the fixed
-        // default is an approximation - narrow or widen the window if you
-        // want it precise for a given time of year.
+        // New York always trades; London is additive when EnableLondonSession
+        // is on. Actual session hours shift with London/NY daylight saving
+        // (which don't change on the same dates), so the fixed windows are
+        // an approximation - edit NyStartHourUTC/NyEndHourUTC/
+        // LondonStartHourUTC/LondonEndHourUTC if you want it precise for a
+        // given time of year.
         private bool WithinTradingSession(DateTime barTime)
         {
-            if (TradeAllSessions)
+            int hour = barTime.Hour;
+
+            bool withinNy = hour >= NyStartHourUTC && hour < NyEndHourUTC;
+            if (withinNy)
                 return true;
 
-            int hour = barTime.Hour;
-            if (SessionStartHourUTC <= SessionEndHourUTC)
-                return hour >= SessionStartHourUTC && hour < SessionEndHourUTC;
-
-            return hour >= SessionStartHourUTC || hour < SessionEndHourUTC;
+            return EnableLondonSession && hour >= LondonStartHourUTC && hour < LondonEndHourUTC;
         }
 
         private List<Position> GetMyPositions()

@@ -44,7 +44,9 @@ namespace cAlgo
     //       must form within MaxBarsFromExtensionBreakToD bars.
     //   E = the 50% retracement of D-C - a limit order is placed there
     //       rather than entering at market.
-    //   Invalidated at any point (after A) if price closes back through A.
+    //   Invalidated at any point (after A) if price closes back through A,
+    //   or (unless MaxBarsPerEarlyPhase is 0) if the B/C/Ext phase runs
+    //   longer than MaxBarsPerEarlyPhase bars without progressing.
     //
     // A fresh pivot takes an idle setup slot, preserving other valid
     // in-progress attempts in the same direction (up to three at once).
@@ -97,6 +99,20 @@ namespace cAlgo
 
         [Parameter("Max. Bars from 100% Break to D", DefaultValue = 80, MinValue = 1, MaxValue = 100, Group = "Signal")]
         public int MaxBarsFromExtensionBreakToD { get; set; }
+
+        // Without this, a setup waiting for B or C (or for the 100%
+        // extension break) has NO timeout at all - only "close back through
+        // A" clears it. On a long enough backtest/live run, price can range
+        // near A indefinitely without ever closing through it, so a slot
+        // gets stuck forever. Since only MaxActiveSetupsPerDirection (3)
+        // slots exist per direction, enough stuck slots silently swallow
+        // every later valid pivot in that direction - the setup just never
+        // fires again until a stuck slot finally frees up. This caps how
+        // long ANY phase before D may wait, same idea as
+        // MaxBarsFromExtensionBreakToD but for the earlier phases. 0 = off
+        // (restores the old unbounded behavior).
+        [Parameter("Max. Bars Waiting for B/C/Ext (stale setup timeout, 0 = off)", DefaultValue = 300, MinValue = 0, MaxValue = 5000, Group = "Signal")]
+        public int MaxBarsPerEarlyPhase { get; set; }
         // === End of shared config ==============================================
 
         // === Confidence Dots - NOT part of shared config/GetIndicator<T>(). ===
@@ -166,6 +182,16 @@ namespace cAlgo
 
         [Output("Order Cancellation Level", LineColor = "Transparent")]
         public IndicatorDataSeries OrderCancellationLevel { get; set; }
+
+        // A's and D's own bar indices on a signal bar - lets the Robot check
+        // that the whole A-D formation happened within one tradable session
+        // occurrence (not just the bar the signal happens to fire on, which
+        // can be well after D itself). NaN when no signal.
+        [Output("A Bar", LineColor = "Transparent")]
+        public IndicatorDataSeries ABar { get; set; }
+
+        [Output("D Bar", LineColor = "Transparent")]
+        public IndicatorDataSeries DBar { get; set; }
 
         [Output("Confidence Buy", LineColor = "Transparent")]
         public IndicatorDataSeries ConfidenceBuySignal { get; set; }
@@ -266,6 +292,8 @@ namespace cAlgo
             TargetLevel[index] = double.NaN;
             EntryLevel[index] = double.NaN;
             OrderCancellationLevel[index] = double.NaN;
+            ABar[index] = double.NaN;
+            DBar[index] = double.NaN;
             ConfidenceBuySignal[index] = 0;
             ConfidenceSellSignal[index] = 0;
             ConfidenceStopAnchor[index] = double.NaN;
@@ -371,10 +399,28 @@ namespace cAlgo
             {
                 bool brokeA = dir == 1 ? barClose < a : barClose > a;
 
-                if (brokeA)
+                // StSeekingD has its own timeout below (measured from the
+                // 100% break, in `candidate` terms). This covers the earlier
+                // phases (B/C/Ext), which otherwise never time out at all -
+                // see MaxBarsPerEarlyPhase's declaration comment.
+                bool stalePhase = MaxBarsPerEarlyPhase > 0 && state != StSeekingD
+                    && index - phaseStartBar > MaxBarsPerEarlyPhase;
+
+                // Each day gets its own state - no in-progress setup carries
+                // over a UTC day boundary. This also guarantees A-D always
+                // land within the same calendar day whenever a signal does
+                // fire, which the Robot's session filter relies on.
+                bool dayChanged = Bars.OpenTimes[index].Date != Bars.OpenTimes[(int)aBar].Date;
+
+                if (brokeA || stalePhase || dayChanged)
                 {
                     // Structure invalidated - price closed back through the
-                    // original A before an entry ever fired. Abandon.
+                    // original A before an entry ever fired, the setup went
+                    // stale waiting on B/C/Ext, or the day rolled over.
+                    // Abandon, and erase whatever partial A/B/C drawing this
+                    // attempt had made - an incomplete sequence shouldn't
+                    // leave marks.
+                    RemoveAttemptObjects(dir, (int)aBar);
                     state = StIdle;
                     phaseStartBar = double.NaN;
                     a = double.NaN; b = double.NaN; c = double.NaN; d = double.NaN;
@@ -395,6 +441,7 @@ namespace cAlgo
                                 bBar = candidate;
                                 state = StSeekingC;
                                 phaseStartBar = candidate;
+                                DrawAttemptAB(dir, (int)aBar, a, candidate, b);
                             }
                         }
                     }
@@ -417,6 +464,7 @@ namespace cAlgo
                                 cBar = candidate;
                                 state = StSeekingExt;
                                 phaseStartBar = candidate;
+                                DrawAttemptBC(dir, (int)aBar, a, (int)bBar, b, candidate, c);
                             }
                         }
                     }
@@ -437,6 +485,9 @@ namespace cAlgo
                 {
                     if (candidate - phaseStartBar > MaxBarsFromExtensionBreakToD)
                     {
+                        // Timed out waiting for D to confirm - never became a
+                        // valid signal, so erase the partial A/B/C drawing.
+                        RemoveAttemptObjects(dir, (int)aBar);
                         state = StIdle;
                         phaseStartBar = double.NaN;
                         a = double.NaN; b = double.NaN; c = double.NaN; d = double.NaN;
@@ -458,7 +509,18 @@ namespace cAlgo
                                 OrderCancellationLevel[index] = d;
                                 StopAnchor[index] = StopMode == StopLossMode.Conservative ? c : a;
                                 TargetLevel[index] = c + (b - a) * TargetExtensionRatio;
-                                DrawAbcdStructure(index, dir, (int)aBar, a, (int)bBar, b, (int)cBar, c, (int)dBar, d);
+                                ABar[index] = aBar;
+                                DBar[index] = dBar;
+                                DrawAttemptD(dir, (int)aBar, (int)dBar, d, c);
+                            }
+                            else
+                            {
+                                // D confirmed but the bar ordering came out
+                                // invalid (shouldn't normally happen) - this
+                                // never becomes a signal, so it doesn't count
+                                // as "completed" either. Erase the partial
+                                // drawing rather than leaving it dangling.
+                                RemoveAttemptObjects(dir, (int)aBar);
                             }
 
                             state = StIdle;
@@ -501,44 +563,88 @@ namespace cAlgo
             extremePrice = selectedPrice;
         }
 
-        private void DrawAbcdStructure(int signalIndex, int dir, int aBar, double a, int bBar, double b, int cBar, double c, int dBar, double d)
+        // Every drawn object for one attempt shares this prefix, keyed by
+        // direction + A's own bar (stable for the attempt's whole life,
+        // since A never moves once set) - so a partial attempt's objects
+        // can be found and erased later without knowing in advance whether
+        // it will ever reach D. See DrawAttemptAB/BC/D and
+        // RemoveAttemptObjects below.
+        private string AttemptPrefix(int dir, int aBar) => $"ABCD_{(dir == 1 ? "Bull" : "Bear")}_{aBar}";
+
+        // B confirmed - this is the first thing drawn (nothing is drawn at
+        // A alone, since a bare pivot with no leg yet isn't worth marking
+        // up): the A label, A-B leg, and B label all appear together.
+        private void DrawAttemptAB(int dir, int aBar, double a, int bBar, double b)
         {
-            if (!ShowAbcdStructure || !HasForwardStructure(aBar, bBar, cBar, dBar))
+            if (!ShowAbcdStructure)
                 return;
 
-            string name = $"ABCD_{(dir == 1 ? "Bull" : "Bear")}_{signalIndex}";
+            string name = AttemptPrefix(dir, aBar);
             Color color = dir == 1 ? AbcdBullColor : AbcdBearColor;
-
-            // Remove chart objects drawn by the earlier manual ABCD renderer.
-            Chart.RemoveObject(name + "_AB");
-            Chart.RemoveObject(name + "_BC");
-            Chart.RemoveObject(name + "_CD");
-            Chart.RemoveObject(name + "_A");
-            Chart.RemoveObject(name + "_B");
-            Chart.RemoveObject(name + "_C");
-            Chart.RemoveObject(name + "_D");
-            Chart.RemoveObject(name + "_E");
-            Chart.RemoveObject(name + "_Entry");
-            Chart.RemoveObject(name);
-            Chart.RemoveObject(name + "_DC");
-
-            int expansionEndBar = Math.Min(Bars.Count - 1, cBar + AbcdProjectionBars);
-            int entryEndBar = Math.Min(Bars.Count - 1, dBar + AbcdProjectionBars);
+            Chart.DrawText(name + "_A", "A", Bars.OpenTimes[aBar], a, color);
             Chart.DrawTrendLine(name + "_AB", Bars.OpenTimes[aBar], a, Bars.OpenTimes[bBar], b, color, StructureLineThickness, LineStyle.Solid);
+            Chart.DrawText(name + "_B", "B", Bars.OpenTimes[bBar], b, color);
+        }
+
+        // C confirmed - add the B-C leg, the C label, and the A-B-C
+        // expansion ratio lines projected from C (these don't depend on D,
+        // so they're already meaningful before D ever forms - matches how
+        // the fib tool looks mid-pattern, not just once a trade fires).
+        private void DrawAttemptBC(int dir, int aBar, double a, int bBar, double b, int cBar, double c)
+        {
+            if (!ShowAbcdStructure)
+                return;
+
+            string name = AttemptPrefix(dir, aBar);
+            Color color = dir == 1 ? AbcdBullColor : AbcdBearColor;
+            int expansionEndBar = Math.Min(Bars.Count - 1, cBar + AbcdProjectionBars);
+
             Chart.DrawTrendLine(name + "_BC", Bars.OpenTimes[bBar], b, Bars.OpenTimes[cBar], c, color, StructureLineThickness, LineStyle.Solid);
+            Chart.DrawText(name + "_C", "C", Bars.OpenTimes[cBar], c, color);
             for (int i = 0; i < AbcdExpansionRatios.Length; i++)
             {
                 double level = c + (b - a) * AbcdExpansionRatios[i];
                 Chart.DrawTrendLine(name + "_Level" + i, Bars.OpenTimes[cBar], level, Bars.OpenTimes[expansionEndBar], level, color, StructureLineThickness, LineStyle.DotsRare);
             }
+        }
 
+        // D confirmed and the setup passed HasForwardStructure - finalize
+        // with the D label and the E (50% D-C) entry line. A/B/C were
+        // already drawn as they formed.
+        private void DrawAttemptD(int dir, int aBar, int dBar, double d, double c)
+        {
+            if (!ShowAbcdStructure)
+                return;
+
+            string name = AttemptPrefix(dir, aBar);
+            Color color = dir == 1 ? AbcdBullColor : AbcdBearColor;
+            int entryEndBar = Math.Min(Bars.Count - 1, dBar + AbcdProjectionBars);
             double entryLevel = (d + c) / 2.0;
+
             Chart.DrawTrendLine(name + "_Entry", Bars.OpenTimes[dBar], entryLevel, Bars.OpenTimes[entryEndBar], entryLevel, color, StructureLineThickness, LineStyle.Solid);
-            Chart.DrawText(name + "_A", "A", Bars.OpenTimes[aBar], a, color);
-            Chart.DrawText(name + "_B", "B", Bars.OpenTimes[bBar], b, color);
-            Chart.DrawText(name + "_C", "C", Bars.OpenTimes[cBar], c, color);
             Chart.DrawText(name + "_D", "D", Bars.OpenTimes[dBar], d, color);
             Chart.DrawText(name + "_E", "E (50% entry)", Bars.OpenTimes[dBar], entryLevel, color);
+        }
+
+        // Erases every object an in-progress attempt might have drawn -
+        // called when a sequence is abandoned (A broken, D timed out, or D
+        // confirmed but the bar ordering came out invalid) rather than
+        // reaching a real signal. RemoveObject is a no-op for a name that
+        // was never drawn, so it's safe to call all of these unconditionally
+        // regardless of which phase the attempt actually reached.
+        private void RemoveAttemptObjects(int dir, int aBar)
+        {
+            string name = AttemptPrefix(dir, aBar);
+            Chart.RemoveObject(name + "_A");
+            Chart.RemoveObject(name + "_AB");
+            Chart.RemoveObject(name + "_B");
+            Chart.RemoveObject(name + "_BC");
+            Chart.RemoveObject(name + "_C");
+            Chart.RemoveObject(name + "_D");
+            Chart.RemoveObject(name + "_E");
+            Chart.RemoveObject(name + "_Entry");
+            for (int i = 0; i < AbcdExpansionRatios.Length; i++)
+                Chart.RemoveObject(name + "_Level" + i);
         }
 
         private static bool HasForwardStructure(double aBar, double bBar, double cBar, double dBar)

@@ -73,31 +73,71 @@ var int bearABar = na
 var int bearBBar = na
 var int bearCBar = na
 var int bearDBar = na
+// A's own bar timestamp - used to reset the whole attempt at a UTC day
+// boundary (each day gets its own state, no in-progress setup carries over).
+var int bullATime = na
+var int bearATime = na
 bool bullishSignal = false
 bool bearishSignal = false
 float stopAnchor = na
 float targetLevel = na
 float entryLevel = na
 
-f_draw_abcd_expansion(aBar, a, bBar, b, cBar, c, dBar, d, signalBar, isBullish, color) =>
-    if aBar < bBar and bBar < cBar and cBar < dBar
-        line.new(aBar, a, bBar, b, color = color, width = 1)
-        line.new(bBar, b, cBar, c, color = color, width = 1)
-        label.new(aBar, a, "A", style = isBullish ? label.style_label_up : label.style_label_down, color = color, textcolor = color.white)
-        label.new(bBar, b, "B", style = isBullish ? label.style_label_down : label.style_label_up, color = color, textcolor = color.white)
-        label.new(cBar, c, "C", style = isBullish ? label.style_label_up : label.style_label_down, color = color, textcolor = color.white)
-        float leg = b - a
-        for ratio in array.from(0.0, 0.5, 1.0, 1.618, 2.0, 2.618, 3.618)
-            float level = c + leg * ratio
-            string levelText = str.tostring(ratio * 100, "#.###") + "%"
-            line.new(cBar, level, signalBar, level, color = color, style = line.style_dotted)
-            label.new(signalBar, level, levelText, style = label.style_none, textcolor = color)
-        label.new(dBar, d, "D", style = isBullish ? label.style_label_down : label.style_label_up, color = color, textcolor = color.white)
-        float entry = (d + c) / 2
-        line.new(dBar, entry, signalBar, entry, color = color, width = 2)
-        label.new(signalBar, entry, "E (50% entry)", style = label.style_none, textcolor = color)
+// Drawn objects for the ONE in-progress attempt per direction (Pine only
+// tracks one active setup per direction, unlike the cTrader indicator's
+// three concurrent slots). Kept as handles (not names, since Pine has no
+// update-by-name) so an abandoned attempt's partial A/B/C drawing can be
+// deleted rather than left dangling. The clear-and-reset sequence is
+// inlined at each call site below (Pine functions can't reassign global
+// `var`s - CE10088) rather than shared through a function.
+var label bullLabelA = na
+var label bullLabelB = na
+var label bullLabelC = na
+var label bullLabelD = na
+var label bullLabelE = na
+var line bullLineAB = na
+var line bullLineBC = na
+var line bullLineEntry = na
+var line[] bullLevelLines = array.new<line>()
+var label bearLabelA = na
+var label bearLabelB = na
+var label bearLabelC = na
+var label bearLabelD = na
+var label bearLabelE = na
+var line bearLineAB = na
+var line bearLineBC = na
+var line bearLineEntry = na
+var line[] bearLevelLines = array.new<line>()
+
+// Pine functions can't reassign global `var`s (CE10088), so clearing an
+// attempt's drawing is inlined at every call site below rather than a
+// shared function - four sites per direction: fresh retrigger, A broken,
+// D timed out, and D confirmed with invalid bar ordering.
 
 if not na(majorLow)
+    // Nothing is drawn yet at A alone - a bare pivot with no leg isn't
+    // worth marking up. Just clear any leftover drawing from whatever this
+    // slot's previous attempt was.
+    if showAbcdStructure
+        label.delete(bullLabelA)
+        label.delete(bullLabelB)
+        label.delete(bullLabelC)
+        label.delete(bullLabelD)
+        label.delete(bullLabelE)
+        line.delete(bullLineAB)
+        line.delete(bullLineBC)
+        line.delete(bullLineEntry)
+        for ln in bullLevelLines
+            line.delete(ln)
+        array.clear(bullLevelLines)
+        bullLabelA := na
+        bullLabelB := na
+        bullLabelC := na
+        bullLabelD := na
+        bullLabelE := na
+        bullLineAB := na
+        bullLineBC := na
+        bullLineEntry := na
     bullState := 1
     bullPhaseStart := bar_index - majorRight
     bullA := majorLow
@@ -105,11 +145,36 @@ if not na(majorLow)
     bullC := na
     bullD := na
     bullABar := bar_index - majorRight
+    bullATime := time[majorRight]
     bullBBar := na
     bullCBar := na
     bullDBar := na
 else if bullState != 0
-    if close < bullA
+    bullDayChanged = year(time) != year(bullATime) or month(time) != month(bullATime) or dayofmonth(time) != dayofmonth(bullATime)
+    if close < bullA or bullDayChanged
+        // Invalidated - price closed back through A before D ever
+        // confirmed, or the day rolled over (each day gets its own state).
+        // Erase whatever partial A/B/C drawing this attempt had.
+        if showAbcdStructure
+            label.delete(bullLabelA)
+            label.delete(bullLabelB)
+            label.delete(bullLabelC)
+            label.delete(bullLabelD)
+            label.delete(bullLabelE)
+            line.delete(bullLineAB)
+            line.delete(bullLineBC)
+            line.delete(bullLineEntry)
+            for ln in bullLevelLines
+                line.delete(ln)
+            array.clear(bullLevelLines)
+            bullLabelA := na
+            bullLabelB := na
+            bullLabelC := na
+            bullLabelD := na
+            bullLabelE := na
+            bullLineAB := na
+            bullLineBC := na
+            bullLineEntry := na
         bullState := 0
         bullABar := na
         bullBBar := na
@@ -121,12 +186,25 @@ else if bullState != 0
             bullBBar := bar_index - swingRight
             bullState := 2
             bullPhaseStart := bar_index - swingRight
+            if showAbcdStructure
+                // First thing actually drawn for this attempt - A appears
+                // together with B, not alone at trigger time.
+                bullLabelA := label.new(bullABar, bullA, "A", style = label.style_label_up, color = color.lime, textcolor = color.white)
+                bullLineAB := line.new(bullABar, bullA, bullBBar, bullB, color = color.lime, width = 1)
+                bullLabelB := label.new(bullBBar, bullB, "B", style = label.style_label_down, color = color.lime, textcolor = color.white)
     else if bullState == 2
         if not na(pivotLow) and bar_index - swingRight > bullPhaseStart and pivotLow < bullB and pivotLow > bullA and pivotLow <= (bullA + bullB) / 2
             bullC := pivotLow
             bullCBar := bar_index - swingRight
             bullState := 3
             bullPhaseStart := bar_index - swingRight
+            if showAbcdStructure
+                bullLineBC := line.new(bullBBar, bullB, bullCBar, bullC, color = color.lime, width = 1)
+                bullLabelC := label.new(bullCBar, bullC, "C", style = label.style_label_up, color = color.lime, textcolor = color.white)
+                float leg = bullB - bullA
+                for ratio in array.from(0.0, 0.5, 1.0, 1.618, 2.0, 2.618, 3.618)
+                    float level = bullC + leg * ratio
+                    array.push(bullLevelLines, line.new(bullCBar, level, bullCBar, level, color = color.lime, style = line.style_dotted, extend = extend.right))
     else if bullState == 3 and close > bullC + (bullB - bullA)
         bullState := 4
         bullPhaseStart := bar_index
@@ -134,6 +212,28 @@ else if bullState != 0
         bullDBar := bar_index
     else if bullState == 4
         if bar_index - swingRight - bullPhaseStart > maxBarsFromExtensionBreakToD
+            // Timed out waiting for D - never became a signal, erase the
+            // partial A/B/C drawing.
+            if showAbcdStructure
+                label.delete(bullLabelA)
+                label.delete(bullLabelB)
+                label.delete(bullLabelC)
+                label.delete(bullLabelD)
+                label.delete(bullLabelE)
+                line.delete(bullLineAB)
+                line.delete(bullLineBC)
+                line.delete(bullLineEntry)
+                for ln in bullLevelLines
+                    line.delete(ln)
+                array.clear(bullLevelLines)
+                bullLabelA := na
+                bullLabelB := na
+                bullLabelC := na
+                bullLabelD := na
+                bullLabelE := na
+                bullLineAB := na
+                bullLineBC := na
+                bullLineEntry := na
             bullState := 0
         else
             if high > bullD
@@ -146,10 +246,58 @@ else if bullState != 0
                     stopAnchor := stopMode == "Conservative" ? bullC : bullA
                     targetLevel := bullC + (bullB - bullA) * 2.618
                     if showAbcdStructure
-                        f_draw_abcd_expansion(bullABar, bullA, bullBBar, bullB, bullCBar, bullC, bullDBar, bullD, bar_index, true, color.lime)
+                        bullLabelD := label.new(bullDBar, bullD, "D", style = label.style_label_down, color = color.lime, textcolor = color.white)
+                        bullLineEntry := line.new(bullDBar, entryLevel, bullDBar, entryLevel, color = color.lime, width = 2, extend = extend.right)
+                        bullLabelE := label.new(bullDBar, entryLevel, "E (50% entry)", style = label.style_none, textcolor = color.lime)
+                else
+                    // D confirmed but bar ordering came out invalid - not a
+                    // real completed sequence, erase the partial drawing.
+                    if showAbcdStructure
+                        label.delete(bullLabelA)
+                        label.delete(bullLabelB)
+                        label.delete(bullLabelC)
+                        label.delete(bullLabelD)
+                        label.delete(bullLabelE)
+                        line.delete(bullLineAB)
+                        line.delete(bullLineBC)
+                        line.delete(bullLineEntry)
+                        for ln in bullLevelLines
+                            line.delete(ln)
+                        array.clear(bullLevelLines)
+                        bullLabelA := na
+                        bullLabelB := na
+                        bullLabelC := na
+                        bullLabelD := na
+                        bullLabelE := na
+                        bullLineAB := na
+                        bullLineBC := na
+                        bullLineEntry := na
                 bullState := 0
 
 if not na(majorHigh)
+    // Nothing is drawn yet at A alone - a bare pivot with no leg isn't
+    // worth marking up. Just clear any leftover drawing from whatever this
+    // slot's previous attempt was.
+    if showAbcdStructure
+        label.delete(bearLabelA)
+        label.delete(bearLabelB)
+        label.delete(bearLabelC)
+        label.delete(bearLabelD)
+        label.delete(bearLabelE)
+        line.delete(bearLineAB)
+        line.delete(bearLineBC)
+        line.delete(bearLineEntry)
+        for ln in bearLevelLines
+            line.delete(ln)
+        array.clear(bearLevelLines)
+        bearLabelA := na
+        bearLabelB := na
+        bearLabelC := na
+        bearLabelD := na
+        bearLabelE := na
+        bearLineAB := na
+        bearLineBC := na
+        bearLineEntry := na
     bearState := 1
     bearPhaseStart := bar_index - majorRight
     bearA := majorHigh
@@ -157,11 +305,33 @@ if not na(majorHigh)
     bearC := na
     bearD := na
     bearABar := bar_index - majorRight
+    bearATime := time[majorRight]
     bearBBar := na
     bearCBar := na
     bearDBar := na
 else if bearState != 0
-    if close > bearA
+    bearDayChanged = year(time) != year(bearATime) or month(time) != month(bearATime) or dayofmonth(time) != dayofmonth(bearATime)
+    if close > bearA or bearDayChanged
+        if showAbcdStructure
+            label.delete(bearLabelA)
+            label.delete(bearLabelB)
+            label.delete(bearLabelC)
+            label.delete(bearLabelD)
+            label.delete(bearLabelE)
+            line.delete(bearLineAB)
+            line.delete(bearLineBC)
+            line.delete(bearLineEntry)
+            for ln in bearLevelLines
+                line.delete(ln)
+            array.clear(bearLevelLines)
+            bearLabelA := na
+            bearLabelB := na
+            bearLabelC := na
+            bearLabelD := na
+            bearLabelE := na
+            bearLineAB := na
+            bearLineBC := na
+            bearLineEntry := na
         bearState := 0
         bearABar := na
         bearBBar := na
@@ -173,12 +343,25 @@ else if bearState != 0
             bearBBar := bar_index - swingRight
             bearState := 2
             bearPhaseStart := bar_index - swingRight
+            if showAbcdStructure
+                // First thing actually drawn for this attempt - A appears
+                // together with B, not alone at trigger time.
+                bearLabelA := label.new(bearABar, bearA, "A", style = label.style_label_down, color = color.red, textcolor = color.white)
+                bearLineAB := line.new(bearABar, bearA, bearBBar, bearB, color = color.red, width = 1)
+                bearLabelB := label.new(bearBBar, bearB, "B", style = label.style_label_up, color = color.red, textcolor = color.white)
     else if bearState == 2
         if not na(pivotHigh) and bar_index - swingRight > bearPhaseStart and pivotHigh > bearB and pivotHigh < bearA and pivotHigh >= (bearA + bearB) / 2
             bearC := pivotHigh
             bearCBar := bar_index - swingRight
             bearState := 3
             bearPhaseStart := bar_index - swingRight
+            if showAbcdStructure
+                bearLineBC := line.new(bearBBar, bearB, bearCBar, bearC, color = color.red, width = 1)
+                bearLabelC := label.new(bearCBar, bearC, "C", style = label.style_label_down, color = color.red, textcolor = color.white)
+                float leg = bearB - bearA
+                for ratio in array.from(0.0, 0.5, 1.0, 1.618, 2.0, 2.618, 3.618)
+                    float level = bearC + leg * ratio
+                    array.push(bearLevelLines, line.new(bearCBar, level, bearCBar, level, color = color.red, style = line.style_dotted, extend = extend.right))
     else if bearState == 3 and close < bearC + (bearB - bearA)
         bearState := 4
         bearPhaseStart := bar_index
@@ -186,6 +369,26 @@ else if bearState != 0
         bearDBar := bar_index
     else if bearState == 4
         if bar_index - swingRight - bearPhaseStart > maxBarsFromExtensionBreakToD
+            if showAbcdStructure
+                label.delete(bearLabelA)
+                label.delete(bearLabelB)
+                label.delete(bearLabelC)
+                label.delete(bearLabelD)
+                label.delete(bearLabelE)
+                line.delete(bearLineAB)
+                line.delete(bearLineBC)
+                line.delete(bearLineEntry)
+                for ln in bearLevelLines
+                    line.delete(ln)
+                array.clear(bearLevelLines)
+                bearLabelA := na
+                bearLabelB := na
+                bearLabelC := na
+                bearLabelD := na
+                bearLabelE := na
+                bearLineAB := na
+                bearLineBC := na
+                bearLineEntry := na
             bearState := 0
         else
             if low < bearD
@@ -198,7 +401,30 @@ else if bearState != 0
                     stopAnchor := stopMode == "Conservative" ? bearC : bearA
                     targetLevel := bearC + (bearB - bearA) * 2.618
                     if showAbcdStructure
-                        f_draw_abcd_expansion(bearABar, bearA, bearBBar, bearB, bearCBar, bearC, bearDBar, bearD, bar_index, false, color.red)
+                        bearLabelD := label.new(bearDBar, bearD, "D", style = label.style_label_up, color = color.red, textcolor = color.white)
+                        bearLineEntry := line.new(bearDBar, entryLevel, bearDBar, entryLevel, color = color.red, width = 2, extend = extend.right)
+                        bearLabelE := label.new(bearDBar, entryLevel, "E (50% entry)", style = label.style_none, textcolor = color.red)
+                else
+                    if showAbcdStructure
+                        label.delete(bearLabelA)
+                        label.delete(bearLabelB)
+                        label.delete(bearLabelC)
+                        label.delete(bearLabelD)
+                        label.delete(bearLabelE)
+                        line.delete(bearLineAB)
+                        line.delete(bearLineBC)
+                        line.delete(bearLineEntry)
+                        for ln in bearLevelLines
+                            line.delete(ln)
+                        array.clear(bearLevelLines)
+                        bearLabelA := na
+                        bearLabelB := na
+                        bearLabelC := na
+                        bearLabelD := na
+                        bearLabelE := na
+                        bearLineAB := na
+                        bearLineBC := na
+                        bearLineEntry := na
                 bearState := 0
 
 plotshape(bullishSignal, "Bullish A-B-C-D-E Entry", shape.circle, location.belowbar, color.lime, size = size.small, text = "BUY")

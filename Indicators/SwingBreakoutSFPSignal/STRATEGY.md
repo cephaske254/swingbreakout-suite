@@ -77,13 +77,29 @@ down, C = top of first retracement, D = new low past the 100% expansion, E
 
 ![Entry sequence diagram: A/B/C/D, the 100% extension, and the second retracement](../../strategy-entry-diagram.svg)
 
+## Trading session
+
+The Robot only acts on a signal whose **A and D both fall within the New
+York session (13:00–22:00 UTC), on the same calendar day** — not just the
+bar the signal happens to fire on, which can be well after D itself.
+**Enable London Session** additionally allows London (08:00–17:00 UTC).
+Both windows are fixed UTC hours, an approximation that drifts by about an
+hour off the true session with the US/UK daylight-saving change (they
+don't change on the same dates).
+
+The indicator itself resets any in-progress A→B→C→D setup at a UTC day
+boundary — each day gets its own state, so a setup can never carry over
+past midnight UTC. This guarantees A and D always land on the same
+calendar day whenever a signal does fire, which the session check above
+relies on.
+
 ## Status
 
 This is the complete strategy as described by the user. No level reaction,
 SFP/B&R, PDH/PDL/PDC, HCOM/LCOM, or micro-structure-shift confluence is part
 of it anymore — a confirmed swing pivot alone starts the A→B→C→D→E sequence.
-No additional risk management, session/timing rules, or filters beyond
-what's written above.
+No additional risk management or filters beyond what's written above and
+the trading session rule.
 
 ## Implementation notes
 
@@ -107,6 +123,14 @@ made that weren't explicitly specified and are worth reviewing:
   first, the pending order is cancelled so it cannot trigger later.
 - **Invalidation**: at any point after A is set, a close back through A
   abandons the whole attempt (not just a single stalled phase).
+- **Drawing follows the sequence live, and disappears if it fails**: A, B,
+  and C (plus the A→B→C expansion ratio lines, which don't depend on D) are
+  drawn on the chart as soon as each one confirms, not only once the whole
+  sequence completes. If an attempt never reaches a signal - A gets broken,
+  D times out, or D confirms but the bar ordering comes out invalid - every
+  object that attempt drew is erased rather than left on the chart. Only a
+  sequence that actually produces a signal keeps its A→B→C→D→E drawing
+  permanently.
 - **Stop-Loss Mode** (`StopMode`: Conservative = SL at C, Normal = SL at A)
   defaults to **Normal** - the user didn't specify a default.
 - The Robot's stop and target are used exactly as the indicator computes
