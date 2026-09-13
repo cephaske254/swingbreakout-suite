@@ -1,20 +1,19 @@
-# Trading Strategy — as described by the user
+# Our Trading Strategy
 
-This file captures the complete trading approach the user described, in
-their own terms, as the basis for reworking the indicator/bot pair.
+This file captures the complete trading approach we use as the basis for
+the indicator/robot pair.
 
 ## What this detects
 
-A confirmed swing pivot is the only trigger — there is no level-reaction
+A confirmed swing pivot is our only trigger — we do not use a level-reaction
 (SFP/B&R), PDH/PDL/PDC, or HCOM/LCOM step anymore. A fresh A→B→C→D→E
 attempt starts directly from any confirmed swing high (bearish) or swing
 low (bullish).
 
 ## Chart timeframe
 
-The user trades the **1-minute chart**. The indicator runs swing detection
-and ATR against whatever timeframe the chart (`Bars`) is attached to, so
-running it on M1 already works.
+We trade the **1-minute chart**. Our indicator runs swing detection and ATR
+against the timeframe attached to the chart (`Bars`), so it works on M1.
 
 ## How a swing pivot is detected — and why it auto-scales to any swing size
 
@@ -28,7 +27,7 @@ asking "is this bar more extreme than its N neighbors on each side," not
 fast-moving one both produce swings the pivot test finds the same way, at
 whatever size those swings actually are.
 
-There are two independent lookback windows:
+We use two independent lookback windows:
 - **Minor** (`SwingLeftBars`/`SwingRightBars`, default 5/5) — used to find
   B, C, and D once a setup is underway, and for the fine-grained
   Confidence Dots tier.
@@ -43,7 +42,7 @@ There are two independent lookback windows:
 
 ## Entry sequence (buy setup — mirror for sell)
 
-1. **A** = a confirmed Major swing low.
+1. **A** = our confirmed Major swing low.
 2. **B** = the top of the first leg up from A (the high before the first
    retracement starts).
 3. **C** = the bottom of the first retracement (where the pullback ends and
@@ -79,33 +78,31 @@ down, C = top of first retracement, D = new low past the 100% expansion, E
 
 ## Trading session
 
-The Robot only acts on a signal whose **A and D both fall within the New
-York session (13:00–22:00 UTC), on the same calendar day** — not just the
-bar the signal happens to fire on, which can be well after D itself.
-**Enable London Session** additionally allows London (08:00–17:00 UTC).
-Both windows are fixed UTC hours, an approximation that drifts by about an
-hour off the true session with the US/UK daylight-saving change (they
-don't change on the same dates).
+Our robot only acts on a signal whose **A and D both fall within the New
+York session (13:00–22:00 UTC), on the same calendar day** — not merely the
+bar on which the signal fires, which can be well after D itself. **Enable
+London Session** also allows London (08:00–17:00 UTC). We use fixed UTC
+hours for both windows, so they can drift by about an hour from the true
+session when US and UK daylight-saving changes occur on different dates.
 
-The indicator itself resets any in-progress A→B→C→D setup at a UTC day
-boundary — each day gets its own state, so a setup can never carry over
-past midnight UTC. This guarantees A and D always land on the same
-calendar day whenever a signal does fire, which the session check above
-relies on.
+Our indicator resets every in-progress A→B→C→D setup at the UTC day
+boundary. Each day has its own state, so a setup cannot carry past midnight
+UTC. This ensures A and D always land on the same calendar day when a
+signal fires, which our session check relies on.
 
 ## Status
 
-This is the complete strategy as described by the user. No level reaction,
-SFP/B&R, PDH/PDL/PDC, HCOM/LCOM, or micro-structure-shift confluence is part
-of it anymore — a confirmed swing pivot alone starts the A→B→C→D→E sequence.
-No additional risk management or filters beyond what's written above and
-the trading session rule.
+This is our complete strategy. We do not include level reaction, SFP/B&R,
+PDH/PDL/PDC, HCOM/LCOM, or micro-structure-shift confluence: a confirmed
+swing pivot alone starts the A→B→C→D→E sequence. We use no additional risk
+management or filters beyond what is written above and the trading-session
+rule.
 
 ## Implementation notes
 
-This strategy is implemented in `SwingBreakoutSFPSignal.cs` (detection) and
-`Swingbreakouttrader.cs` (execution). A few implementation decisions were
-made that weren't explicitly specified and are worth reviewing:
+We implement this strategy in `SwingBreakoutSFPSignal.cs` (detection) and
+`Swingbreakouttrader.cs` (execution). We made a few implementation decisions
+that were not explicitly specified:
 
 - **Nearest structure**: A is fixed to the triggering pivot bar. B is the
   first valid same-direction pivot after A, and C is the first valid
@@ -132,7 +129,7 @@ made that weren't explicitly specified and are worth reviewing:
   sequence that actually produces a signal keeps its A→B→C→D→E drawing
   permanently.
 - **Stop-Loss Mode** (`StopMode`: Conservative = SL at C, Normal = SL at A)
-  defaults to **Normal** - the user didn't specify a default.
+  defaults to **Normal**, our chosen default.
 - The Robot's stop and target are used exactly as the indicator computes
   them - no ATR buffer or minimum/maximum distance is layered on top, since
   the strategy fully specifies both. The one exception is `MinRiskRewardRatio`

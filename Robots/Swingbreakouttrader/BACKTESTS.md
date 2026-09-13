@@ -1,12 +1,12 @@
-# Backtest log
+# Our Backtest Log
 
-All runs use `ctrader-cli backtest` against the compiled `Swingbreakouttrader.algo`
+We run every test with `ctrader-cli backtest` against the compiled `Swingbreakouttrader.algo`
 (bundling its `SwingBreakoutSFPSignal` indicator dependency), XAUUSD, M1,
 every parameter at its shipped default, $200 starting balance, on a demo
 account.
 
-**Defaults changed on 2026-09-11.** The tested XAUUSD M1 `.cbotset` was
-updated (`TrendTimeFrame` m5→m1, `MinRiskAmount` 5→6, `BreakevenTriggerRR`
+**We changed the defaults on 2026-09-11.** We updated the tested XAUUSD M1 `.cbotset`
+(`TrendTimeFrame` m5→m1, `MinRiskAmount` 5→6, `BreakevenTriggerRR`
 0.25→0.5, `TradeAllSessions` false→true, plus the new `EnableTrading`
 parameter defaulting true) and the shipped defaults were re-synced to match.
 **Runs 1-9 below all predate that change** and were run under the prior
@@ -30,7 +30,7 @@ run's own section says which default set it used.
 | 03/08 - 10/08/2026 | 7d (full week) | 0 | $0.00 | 0% | prior | August |
 | 08/09 - 11/09/2026 (redo) | 3d | 2 | +$46.22 | +23.11% | **current** | Run 1b, see below |
 
-**Do not sum these as six independent samples.** Three of the five
+**We do not sum these as six independent samples.** Three of the five
 randomized windows (01-04/09, 02-05/09, 03-06/09) overlap and captured the
 exact same physical trade - see "Overlap and an observed anomaly" below.
 Treated correctly, this is really only 4 distinct trade outcomes (1 win,
@@ -104,12 +104,12 @@ as "winning" in the trade-count field.
 
 ## Runs 2-6: five randomized 3-day windows within one week
 
-**Methodology:** picked one calendar week, Monday 31/08/2026 through Sunday
-06/09/2026. A 3-consecutive-calendar-day window fully inside a 7-day week
-has exactly 5 possible start days (Mon-Fri); the run order below was
-produced by `random.shuffle` over those 5 offsets (see commit history for
-the exact script) rather than hand-picked. Each window uses the identical
-command template as Run 1, only `--start`/`--end`/`--report-json` change:
+**Methodology:** We picked one calendar week, Monday 31/08/2026 through
+Sunday 06/09/2026. A 3-consecutive-calendar-day window fully inside a 7-day
+week has exactly 5 possible start days (Mon-Fri); we produced the run order
+below with `random.shuffle` over those 5 offsets (see commit history for the
+exact script), rather than hand-picking it. Each window uses the same command
+template as Run 1; only `--start`, `--end`, and `--report-json` change:
 
 ```
 ctrader-cli backtest Swingbreakouttrader.algo \
@@ -147,26 +147,24 @@ What's worth flagging: the 01/09-04/09 window's nominal end boundary is
 window starts exactly at 2026-09-04T00:00:00Z and should, on a naive reading,
 also cover that same 07:06 UTC entry, but it reported zero trades. Both
 windows can't be simultaneously "correct" under a simple start/end boundary
-model. This wasn't investigated further (root cause is unconfirmed - could
+model. We did not investigate this further. The root cause is unconfirmed: it may
 be how `ctrader-cli backtest` interprets `--end`, how much historical
 warm-up data a given `--start` makes available to the indicator's swing/
-level tracking, or something else) - flagging it here rather than
-presenting the 01/09-04/09 and 04/09-07/09 results as more precise than they
-are. Treat exact trade timing right at a backtest window's edges with
-caution; the 02/09-05/09 and 03/09-06/09 results, where the trade sits
-comfortably inside the window rather than at its boundary, are less exposed
-to this specific question.
+level tracking, or something else. We flag it rather than present the
+01/09-04/09 and 04/09-07/09 results as more precise than they are. We treat
+trade timing at a backtest window's edges with caution; the 02/09-05/09 and
+03/09-06/09 results, where the trade sits comfortably inside the window, are
+less exposed to this question.
 
 ## Runs 7-9: one full week per month, three different months
 
-**Methodology:** three different months (June, July, August 2026 - all
-fully completed relative to when these were run, so no future/unavailable
-data), one week randomly chosen within each month (`random.choice` over
-that month's Mondays), backtesting the **whole week** (Monday 00:00 UTC to
-the following Monday 00:00 UTC) rather than a 3-day slice, per preference -
-a full week gives the strategy's session-window and clustering filters more
-room to matter than a 3-day slice does. Same command template as the runs
-above, only the window length changes:
+**Methodology:** We selected three different months (June, July, and August
+2026, all complete when we ran these tests, so no future or unavailable data)
+and randomly chose one week in each month (`random.choice` over that month's
+Mondays). We backtested the **whole week** (Monday 00:00 UTC to the following
+Monday 00:00 UTC) rather than a 3-day slice. A full week gives the strategy's
+session-window and clustering filters more room to matter. We use the same
+command template as the runs above; only the window length changes:
 
 ```
 ctrader-cli backtest Swingbreakouttrader.algo \
@@ -197,7 +195,7 @@ a demonstrated edge, and the one clearly profitable run (the original,
 08/09-11/09) looks more like an outlier than a baseline once more weeks are
 added.
 
-## Caveats that apply to every run above
+## Caveats we apply to every run above
 
 - **Tiny sample size.** Nine backtest windows (several 3-day windows
   overlapping) produced 6 distinct trade outcomes total, spanning three
@@ -215,6 +213,6 @@ added.
   strategy's own execution timeframe (see STRATEGY.md) but is a coarser
   simulation of intra-bar wick behavior than `--data-mode=ticks` would give
   for SFP sweep detection specifically.
-- Always re-verify on a demo account with real spread/commission and a
-  longer, non-overlapping window before drawing any conclusion about live
+- We always re-verify on a demo account with real spread/commission and a
+  longer, non-overlapping window before drawing conclusions about live
   viability.

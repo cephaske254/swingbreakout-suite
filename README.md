@@ -1,15 +1,15 @@
 # SwingBreakout SFP/B&R Suite
 
-**This is a [cTrader](https://ctrader.com) algo** - two cAlgo (cTrader's
+**We built this [cTrader](https://ctrader.com) algo** as two cAlgo (cTrader's
 C#/.NET algo API) projects implementing an SFP (Swing Failure Pattern) / B&R
 (Break & Retest) trading method with an A-B-C-D fib-extension entry
 sequence, split into a pure signal indicator and an execution robot:
 
-- **`Indicators/SwingBreakoutSFPSignal/`** — the indicator. Detects SFP and
+- **`Indicators/SwingBreakoutSFPSignal/`** — our indicator. It detects SFP and
   B&R reactions at PDH/PDL/PDC, month-to-date close highs/lows, and swing
   highs/lows, and runs the A-B-C-D entry sequence. No order or position
   logic. See `STRATEGY.md` for the full method with diagrams.
-- **`Robots/Swingbreakouttrader/`** — the execution robot. Drives the
+- **`Robots/Swingbreakouttrader/`** — our execution robot. It drives the
   indicator via `Indicators.GetIndicator<SwingBreakoutSFPSignal>(...)` and
   handles only trade management: sizing, stop/target placement (taken
   as-is from the indicator), breakeven, trailing stop, and entry-side
@@ -38,9 +38,9 @@ the header comments in `Swingbreakouttrader.cs` for the full setup notes.
 
 ## Developer: cTrader Automate workspace
 
-For development in cTrader Automate, link its local source workspace to
+When we develop in cTrader Automate, we link its local source workspace to
 this repository rather than maintaining a second copy of either project.
-The linked folders are:
+We link these folders:
 
 - `Indicators/SwingBreakoutSFPSignal/`
 - `Robots/Swingbreakouttrader/`
@@ -52,12 +52,12 @@ The linked folders are:
 | Linux | `~/cAlgo/Sources` when created by local cTrader tooling | Use symbolic links if the local workspace exists. |
 | Web and mobile | None | These clients do not expose a local Automate source workspace. Develop/build on desktop or with the CLI. |
 
-Before creating either link, make sure the destination does **not** already
-exist. If it contains work you need, move it to a backup location first.
+Before we create either link, we make sure the destination does **not** already
+exist. If it contains work we need, we move it to a backup location first.
 
 ### macOS and Linux
 
-Run these commands from the repository root:
+We run these commands from the repository root:
 
 ```bash
 workspace="$HOME/cAlgo/Sources"
@@ -70,7 +70,7 @@ ln -s "$repo/Robots/Swingbreakouttrader" \
   "$workspace/Robots/Swingbreakouttrader"
 ```
 
-Confirm that both paths resolve into the repository:
+We confirm that both paths resolve into the repository:
 
 ```bash
 readlink "$workspace/Indicators/SwingBreakoutSFPSignal"
@@ -79,7 +79,7 @@ readlink "$workspace/Robots/Swingbreakouttrader"
 
 ### Windows
 
-Open **PowerShell** from the repository root and create directory junctions:
+We open **PowerShell** from the repository root and create directory junctions:
 
 ```powershell
 $workspace = Join-Path $env:USERPROFILE "Documents\cAlgo\Sources"
@@ -92,23 +92,23 @@ New-Item -ItemType Junction -Path "$workspace\Robots\Swingbreakouttrader" `
   -Target "$repo\Robots\Swingbreakouttrader"
 ```
 
-Use `Get-Item "$workspace\Indicators\SwingBreakoutSFPSignal"` and
+We use `Get-Item "$workspace\Indicators\SwingBreakoutSFPSignal"` and
 `Get-Item "$workspace\Robots\Swingbreakouttrader"` to confirm that each
-item is a junction. Open or build the linked source in cTrader Automate;
-changes made from cTrader are then changes in this Git repository.
+item is a junction. When we open or build the linked source in cTrader
+Automate, its changes are changes in this Git repository.
 
 ## Developer: TradingView Pine indicator
 
-The TradingView-only indicator is a Pine Script v6 translation at:
+We also provide a TradingView-only Pine Script v6 translation at:
 
 `Indicators/SwingBreakoutSFPSignal/SwingBreakoutSFPSignal/SwingBreakoutSFPSignal.pine`
 
-It contains the indicator-side strategy only: active swing and daily levels,
+It contains only our indicator-side strategy: active swing and daily levels,
 SFP/B&R detection, the A-B-C-D entry sequence, confidence dots, stop/target
-plots, and alert conditions. It does **not** contain cTrader robot, order,
-or position management code.
+plots, and alert conditions. It does **not** include cTrader robot, order,
+or position-management code.
 
-To install it in TradingView:
+To install it in TradingView, we:
 
 1. Open **Pine Editor** on a chart.
 2. Create a new indicator script, replace its contents with the `.pine` file
@@ -116,7 +116,7 @@ To install it in TradingView:
 3. Create TradingView alerts from the script's bullish/bearish entry or
    green/red confidence-dot alert conditions as needed.
 
-The Pine version uses TradingView's chart-bar volume direction
+Our Pine version uses TradingView's chart-bar volume direction
 (close above/below open) as the portable confidence proxy. The cTrader
 version can classify lower-timeframe tick-volume bars inside each chart bar,
 so confidence-dot colors can differ between the two platforms when their
@@ -124,10 +124,10 @@ available volume data differs.
 
 ## Parameter defaults
 
-The parameters shared between both algos are forwarded **positionally**
-from the robot to the indicator via `GetIndicator<T>(...)` — see the
-header comment in `Swingbreakouttrader.cs` before reordering any of them.
-Their default values live in one place,
+We forward parameters shared between both algos **positionally** from the
+robot to the indicator via `GetIndicator<T>(...)`. Before reordering any of
+them, we review the header comment in `Swingbreakouttrader.cs`. We keep
+their defaults in one place,
 `Indicators/SwingBreakoutSFPSignal/SwingBreakoutSFPSignal/SharedSignalDefaults.cs`,
 referenced by both files' `[Parameter]` attributes.
 
@@ -143,23 +143,24 @@ See [`Indicators/SwingBreakoutSFPSignal/STRATEGY.md`](Indicators/SwingBreakoutSF
 
 ## Testing status
 
-Tested on **XAUUSD** with the robot's **default parameters** (matching the
-tested XAUUSD M1 `.cbotset`), via `ctrader-cli backtest`, M1, $200 starting
-balance: one 3-day run (08/09/2026-11/09/2026, +23.11% ROI, 1 trade), five
-more 3-day windows randomized within a single week (31/08-06/09/2026), and
-three full-week runs, one per month across June-August 2026. See
+We tested **XAUUSD** with the robot's **default parameters** (matching the
+tested XAUUSD M1 `.cbotset`) using `ctrader-cli backtest` on M1 with a $200
+starting balance: one 3-day run (08/09/2026-11/09/2026, +23.11% ROI, 1
+trade), five more 3-day windows randomized within a single week
+(31/08-06/09/2026), and three full-week runs, one per month across
+June-August 2026. See
 [`Robots/Swingbreakouttrader/BACKTESTS.md`](Robots/Swingbreakouttrader/BACKTESTS.md)
-for the full write-up, method, and caveats — including three overlapping
+for our full write-up, method, and caveats — including three overlapping
 windows that captured the same trade (not independent samples), an observed
-backtest-boundary anomaly, and a direct statement that the aggregate across
-all 9 runs currently leans losing/flat rather than showing a demonstrated
-edge — read those caveats before treating any of this as validation. Raw
-report JSON for all nine runs is attached under
+backtest-boundary anomaly, and our conclusion that the aggregate across all
+9 runs currently leans losing/flat rather than showing a demonstrated edge.
+We recommend reading those caveats before treating any of this as
+validation. We attach raw report JSON for all nine runs under
 [`Robots/Swingbreakouttrader/backtests/`](Robots/Swingbreakouttrader/backtests/).
 
 ## Disclaimer
 
-Always run on a demo account and backtest across a meaningful date range
-and multiple symbols before pointing this at a live account. Nothing here
-is investment advice, and historical/backtested performance is not a
-guarantee of future results.
+We always run this on a demo account and backtest it across a meaningful
+date range and multiple symbols before using it on a live account. We do
+not provide investment advice, and historical/backtested performance is not
+a guarantee of future results.
