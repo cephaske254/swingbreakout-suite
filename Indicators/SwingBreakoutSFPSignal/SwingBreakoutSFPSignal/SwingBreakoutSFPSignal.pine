@@ -4,53 +4,32 @@ indicator("Swing Breakout SFP Signal", shorttitle = "Swing SFP", overlay = true,
 // Pine Script translation of the cTrader SwingBreakoutSFPSignal indicator.
 // Signals are confirmed at bar close. Pivot-dependent features appear only
 // after their configured right-side confirmation bars have completed.
+//
+// A confirmed MAJOR swing pivot is the only trigger - no level reaction,
+// break, or retest step. A fresh A-B-C-D-E attempt starts directly from any
+// confirmed Major swing low (bullish) or swing high (bearish). Pivot
+// detection (ta.pivothigh/pivotlow) is a pure shape test over a fixed
+// bar-count window with no price/ATR distance involved, which is what
+// makes it find small and large swings identically. A uses the bigger
+// Major lookback rather than the minor one used for B/C/D and Confidence
+// Dots - a small lookback fires on noise-sized wiggles, which would spawn
+// a fresh conflicting setup on almost every ranging stretch.
 
 groupSignal = "Signal"
-groupLevels = "Levels"
-groupConfluence = "Confluence"
 groupConfidence = "Confidence Dots"
-groupConsolidation = "Consolidation Highlight"
 
 swingLeft = input.int(5, "Swing Lookback - Left Bars", minval = 1, maxval = 50, group = groupSignal)
 swingRight = input.int(5, "Swing Lookback - Right Bars", minval = 1, maxval = 50, group = groupSignal)
 atrPeriod = input.int(5, "ATR Period", minval = 1, group = groupSignal)
-minSweepAtr = input.float(0.10, "Min. Sweep/Break Depth beyond level (x ATR)", minval = 0, step = 0.05, group = groupSignal)
 stopMode = input.string("Normal", "Stop-Loss Mode", options = ["Conservative", "Normal"], group = groupSignal)
 showAbcdStructure = input.bool(true, "Show A-B-C-D Structure", group = groupSignal)
-
-trackPriorSwing = input.bool(true, "Track Prior Swing High/Low", group = groupLevels)
-trackPDHPDL = input.bool(true, "Track Prior Day High/Low/Close", group = groupLevels)
-trackHcomLcom = input.bool(true, "Track Month-to-Date Close High/Low (HCOM/LCOM)", group = groupLevels)
-trendTimeframe = input.timeframe("1", "Higher Timeframe (for SMA trend filter)", group = groupLevels)
-
-requireTrendFilter = input.bool(true, "Require SMA trend filter (direction + separation)", group = groupConfluence)
+maxBarsFromExtensionBreakToD = input.int(80, "Max. Bars from 100% Break to D", minval = 1, maxval = 100, group = groupSignal)
 
 showConfidenceDots = input.bool(true, "Show Confidence Dots", group = groupConfidence)
 majorLeft = input.int(15, "Major Swing Lookback - Left Bars", minval = 1, maxval = 100, group = groupConfidence)
 majorRight = input.int(15, "Major Swing Lookback - Right Bars", minval = 1, maxval = 100, group = groupConfidence)
 maxConfidenceDots = input.int(80, "Max Visible Confidence Dots (per tier)", minval = 10, maxval = 400, group = groupConfidence, tooltip = "Older dots beyond this count are deleted. Keeps the chart's price scale fitted to recent price action and keeps TradingView's renderer from lagging behind on pan/zoom.")
 confidenceDotSize = input.int(4, "Confidence Dot Size", minval = 1, maxval = 20, group = groupConfidence)
-
-highlightConsolidation = input.bool(true, "Highlight Consolidation", group = groupConsolidation)
-consolidationAdxPeriod = input.int(14, "Consolidation ADX Period", minval = 2, group = groupConsolidation)
-consolidationMaxAdx = input.float(17.0, "Consolidation Max ADX", minval = 1.0, step = 1.0, group = groupConsolidation)
-consolidationMinBars = input.int(15, "Consolidation Min. Bars", minval = 2, group = groupConsolidation)
-
-f_month_high_close() =>
-    var float result = na
-    if timeframe.change("M")
-        result := close
-    else
-        result := math.max(nz(result, close), close)
-    result
-
-f_month_low_close() =>
-    var float result = na
-    if timeframe.change("M")
-        result := close
-    else
-        result := math.min(nz(result, close), close)
-    result
 
 f_window_buy_pct(length) =>
     float buyVolume = 0.0
@@ -67,145 +46,13 @@ f_window_buy_pct(length) =>
     total > 0 ? buyVolume / total * 100 : 50
 
 atr = ta.atr(atrPeriod)
-threshold = minSweepAtr * atr
-
-// Daily values are requested independently of the chart timeframe. Each
-// group is fetched as a single tuple call rather than one request.security
-// per value - same results, far fewer separate security contexts for
-// TradingView to maintain and recalculate.
-[pdh, pdl, pdc] = request.security(syminfo.tickerid, "D", [high[1], low[1], close[1]], lookahead = barmerge.lookahead_off)
-[hcom, lcom] = request.security(syminfo.tickerid, "D", [f_month_high_close(), f_month_low_close()], lookahead = barmerge.lookahead_off)
-
-[htfSma20, htfSma200, htfAtr] = request.security(syminfo.tickerid, trendTimeframe, [ta.sma(close, 20), ta.sma(close, 200), ta.sma(ta.tr(true), atrPeriod)], lookahead = barmerge.lookahead_off)
-
-trendBuy = not requireTrendFilter or (close > htfSma200 and htfSma20 > htfSma200 and math.abs(htfSma20 - htfSma200) >= htfAtr * 0.5)
-trendSell = not requireTrendFilter or (close < htfSma200 and htfSma20 < htfSma200 and math.abs(htfSma20 - htfSma200) >= htfAtr * 0.5)
-
-// Keep only the most significant active swing until price closes through it.
-var float lastSwingHigh = na
-var float lastSwingLow = na
-var bool swingHighBroken = false
-var bool swingLowBroken = false
-
-if not na(lastSwingLow) and not swingLowBroken and close < lastSwingLow
-    swingLowBroken := true
-if not na(lastSwingHigh) and not swingHighBroken and close > lastSwingHigh
-    swingHighBroken := true
 
 pivotHigh = ta.pivothigh(high, swingLeft, swingRight)
 pivotLow = ta.pivotlow(low, swingLeft, swingRight)
-if not na(pivotHigh) and (swingHighBroken or na(lastSwingHigh) or pivotHigh > lastSwingHigh)
-    lastSwingHigh := pivotHigh
-    swingHighBroken := false
-if not na(pivotLow) and (swingLowBroken or na(lastSwingLow) or pivotLow < lastSwingLow)
-    lastSwingLow := pivotLow
-    swingLowBroken := false
+majorHigh = ta.pivothigh(high, majorLeft, majorRight)
+majorLow = ta.pivotlow(low, majorLeft, majorRight)
 
-plot(trackPriorSwing and not swingHighBroken ? lastSwingHigh : na, "Active Swing High", color = color.new(color.red, 35), style = plot.style_linebr)
-plot(trackPriorSwing and not swingLowBroken ? lastSwingLow : na, "Active Swing Low", color = color.new(color.lime, 35), style = plot.style_linebr)
-
-bearishSfp = (trackPriorSwing and not na(lastSwingHigh) and high > lastSwingHigh and close < lastSwingHigh and high - lastSwingHigh >= threshold) or
-     (trackPDHPDL and not na(pdh) and high > pdh and close < pdh and high - pdh >= threshold) or
-     (trackPDHPDL and not na(pdc) and high > pdc and close < pdc and high - pdc >= threshold) or
-     (trackHcomLcom and not na(hcom) and high > hcom and close < hcom and high - hcom >= threshold)
-bullishSfp = (trackPriorSwing and not na(lastSwingLow) and low < lastSwingLow and close > lastSwingLow and lastSwingLow - low >= threshold) or
-     (trackPDHPDL and not na(pdl) and low < pdl and close > pdl and pdl - low >= threshold) or
-     (trackPDHPDL and not na(pdc) and low < pdc and close > pdc and pdc - low >= threshold) or
-     (trackHcomLcom and not na(lcom) and low < lcom and close > lcom and lcom - low >= threshold)
-
-// B&R has one pending level per direction, matching the cTrader indicator.
-var float bullishPendingLevel = na
-var float bearishPendingLevel = na
-bool bullishBnr = false
-bool bearishBnr = false
-
-if not na(bullishPendingLevel)
-    if low <= bullishPendingLevel and close > bullishPendingLevel
-        bullishBnr := true
-        bullishPendingLevel := na
-    else if close < bullishPendingLevel
-        bullishPendingLevel := na
-else
-    float bullishBreak = na
-    if trackPriorSwing and not na(lastSwingHigh) and close > lastSwingHigh + threshold
-        bullishBreak := lastSwingHigh
-    else if trackPDHPDL and not na(pdh) and close > pdh + threshold
-        bullishBreak := pdh
-    else if trackPDHPDL and not na(pdc) and close > pdc + threshold
-        bullishBreak := pdc
-    else if trackHcomLcom and not na(hcom) and close > hcom + threshold
-        bullishBreak := hcom
-    bullishPendingLevel := bullishBreak
-
-if not na(bearishPendingLevel)
-    if high >= bearishPendingLevel and close < bearishPendingLevel
-        bearishBnr := true
-        bearishPendingLevel := na
-    else if close > bearishPendingLevel
-        bearishPendingLevel := na
-else
-    float bearishBreak = na
-    if trackPriorSwing and not na(lastSwingLow) and close < lastSwingLow - threshold
-        bearishBreak := lastSwingLow
-    else if trackPDHPDL and not na(pdl) and close < pdl - threshold
-        bearishBreak := pdl
-    else if trackPDHPDL and not na(pdc) and close < pdc - threshold
-        bearishBreak := pdc
-    else if trackHcomLcom and not na(lcom) and close < lcom - threshold
-        bearishBreak := lcom
-    bearishPendingLevel := bearishBreak
-
-// Computed before the A-B-C-D state machine below, since entry firing
-// reads this same bar's consolidation box state.
-[_, _, consolidationAdx] = ta.dmi(consolidationAdxPeriod, consolidationAdxPeriod)
-lowAdx = consolidationAdx < consolidationMaxAdx
-var int consolidationStart = na
-var float consolidationHigh = na
-var float consolidationLow = na
-if lowAdx
-    if not lowAdx[1]
-        consolidationStart := bar_index
-        consolidationHigh := high
-        consolidationLow := low
-    else
-        consolidationHigh := math.max(consolidationHigh, high)
-        consolidationLow := math.min(consolidationLow, low)
-else
-    consolidationStart := na
-    consolidationHigh := na
-    consolidationLow := na
-consolidating = lowAdx and not na(consolidationStart) and bar_index - consolidationStart + 1 >= consolidationMinBars
-
-// The most recently confirmed consolidation box's bounds, held even after
-// price breaks out of it, and which side it broke out on - reset only when
-// the NEXT consolidation is confirmed. Lets an entry tell "inside old chop"
-// apart from "retest of a box we already broke out of".
-var float consolBoxHigh = na
-var float consolBoxLow = na
-var int consolBoxBrokenDir = 0
-if consolidating
-    consolBoxHigh := consolidationHigh
-    consolBoxLow := consolidationLow
-    consolBoxBrokenDir := 0
-else if not na(consolBoxHigh)
-    if close > consolBoxHigh
-        consolBoxBrokenDir := 1
-    else if close < consolBoxLow
-        consolBoxBrokenDir := -1
-
-// Never enter inside a consolidation box - unless the entry direction
-// matches the side the box was already broken out on (a breakout retest,
-// not a trade inside the chop).
-f_consolidation_blocks_entry(dir, entryPrice) =>
-    blocked = false
-    if consolidating
-        blocked := true
-    else if not na(consolBoxHigh) and entryPrice <= consolBoxHigh and entryPrice >= consolBoxLow
-        isRetest = (dir == 1 and consolBoxBrokenDir > 0) or (dir == -1 and consolBoxBrokenDir < 0)
-        blocked := not isRetest
-    blocked
-
-// A-B-C-D state machine: 0 idle, 1 B, 2 C, 3 extension, 4 D.
+// A-B-C-D state machine: 0 idle, 1 seeking B, 2 seeking C, 3 seeking extension, 4 seeking D.
 var int bullState = 0
 var int bearState = 0
 var int bullPhaseStart = na
@@ -250,38 +97,32 @@ f_draw_abcd_expansion(aBar, a, bBar, b, cBar, c, dBar, d, signalBar, isBullish, 
         line.new(dBar, entry, signalBar, entry, color = color, width = 2)
         label.new(signalBar, entry, "E (50% entry)", style = label.style_none, textcolor = color)
 
-if bullishSfp or bullishBnr
+if not na(majorLow)
     bullState := 1
-    bullPhaseStart := bar_index
-    bullA := low
+    bullPhaseStart := bar_index - majorRight
+    bullA := majorLow
     bullB := na
     bullC := na
     bullD := na
-    bullABar := bar_index
+    bullABar := bar_index - majorRight
     bullBBar := na
     bullCBar := na
     bullDBar := na
 else if bullState != 0
-    if bullState != 1 and close < bullA
+    if close < bullA
         bullState := 0
         bullABar := na
         bullBBar := na
         bullCBar := na
         bullDBar := na
     else if bullState == 1
-        if low < bullA
-            bullA := low
-            bullABar := bar_index
         if not na(pivotHigh) and bar_index - swingRight > bullPhaseStart and pivotHigh > bullA
             bullB := pivotHigh
             bullBBar := bar_index - swingRight
             bullState := 2
             bullPhaseStart := bar_index - swingRight
     else if bullState == 2
-        if not na(pivotHigh) and bar_index - swingRight > bullPhaseStart and pivotHigh > bullB
-            bullB := pivotHigh
-            bullBBar := bar_index - swingRight
-        if not na(pivotLow) and bar_index - swingRight > bullPhaseStart and pivotLow < bullB and pivotLow > bullA
+        if not na(pivotLow) and bar_index - swingRight > bullPhaseStart and pivotLow < bullB and pivotLow > bullA and pivotLow <= (bullA + bullB) / 2
             bullC := pivotLow
             bullCBar := bar_index - swingRight
             bullState := 3
@@ -289,50 +130,51 @@ else if bullState != 0
     else if bullState == 3 and close > bullC + (bullB - bullA)
         bullState := 4
         bullPhaseStart := bar_index
-    else if bullState == 4 and not na(pivotHigh) and bar_index - swingRight > bullPhaseStart
-        bullD := pivotHigh
-        bullDBar := bar_index - swingRight
-        entryLevel := (bullD + bullC) / 2
-        if bullABar < bullBBar and bullBBar < bullCBar and bullCBar < bullDBar and trendBuy and not f_consolidation_blocks_entry(1, entryLevel)
-            bullishSignal := true
-            stopAnchor := stopMode == "Conservative" ? bullC : bullA
-            targetLevel := bullC + (bullB - bullA) * 2.618
-            if showAbcdStructure
-                f_draw_abcd_expansion(bullABar, bullA, bullBBar, bullB, bullCBar, bullC, bullDBar, bullD, bar_index, true, color.lime)
+        bullD := high
+        bullDBar := bar_index
+    else if bullState == 4
+        if bar_index - swingRight - bullPhaseStart > maxBarsFromExtensionBreakToD
             bullState := 0
+        else
+            if high > bullD
+                bullD := high
+                bullDBar := bar_index
+            if not na(pivotLow) and bar_index - swingRight > bullPhaseStart
+                entryLevel := (bullD + bullC) / 2
+                if bullABar < bullBBar and bullBBar < bullCBar and bullCBar < bullDBar
+                    bullishSignal := true
+                    stopAnchor := stopMode == "Conservative" ? bullC : bullA
+                    targetLevel := bullC + (bullB - bullA) * 2.618
+                    if showAbcdStructure
+                        f_draw_abcd_expansion(bullABar, bullA, bullBBar, bullB, bullCBar, bullC, bullDBar, bullD, bar_index, true, color.lime)
+                bullState := 0
 
-if bearishSfp or bearishBnr
+if not na(majorHigh)
     bearState := 1
-    bearPhaseStart := bar_index
-    bearA := high
+    bearPhaseStart := bar_index - majorRight
+    bearA := majorHigh
     bearB := na
     bearC := na
     bearD := na
-    bearABar := bar_index
+    bearABar := bar_index - majorRight
     bearBBar := na
     bearCBar := na
     bearDBar := na
 else if bearState != 0
-    if bearState != 1 and close > bearA
+    if close > bearA
         bearState := 0
         bearABar := na
         bearBBar := na
         bearCBar := na
         bearDBar := na
     else if bearState == 1
-        if high > bearA
-            bearA := high
-            bearABar := bar_index
         if not na(pivotLow) and bar_index - swingRight > bearPhaseStart and pivotLow < bearA
             bearB := pivotLow
             bearBBar := bar_index - swingRight
             bearState := 2
             bearPhaseStart := bar_index - swingRight
     else if bearState == 2
-        if not na(pivotLow) and bar_index - swingRight > bearPhaseStart and pivotLow < bearB
-            bearB := pivotLow
-            bearBBar := bar_index - swingRight
-        if not na(pivotHigh) and bar_index - swingRight > bearPhaseStart and pivotHigh > bearB and pivotHigh < bearA
+        if not na(pivotHigh) and bar_index - swingRight > bearPhaseStart and pivotHigh > bearB and pivotHigh < bearA and pivotHigh >= (bearA + bearB) / 2
             bearC := pivotHigh
             bearCBar := bar_index - swingRight
             bearState := 3
@@ -340,20 +182,27 @@ else if bearState != 0
     else if bearState == 3 and close < bearC + (bearB - bearA)
         bearState := 4
         bearPhaseStart := bar_index
-    else if bearState == 4 and not na(pivotLow) and bar_index - swingRight > bearPhaseStart
-        bearD := pivotLow
-        bearDBar := bar_index - swingRight
-        entryLevel := (bearD + bearC) / 2
-        if bearABar < bearBBar and bearBBar < bearCBar and bearCBar < bearDBar and trendSell and not f_consolidation_blocks_entry(-1, entryLevel)
-            bearishSignal := true
-            stopAnchor := stopMode == "Conservative" ? bearC : bearA
-            targetLevel := bearC + (bearB - bearA) * 2.618
-            if showAbcdStructure
-                f_draw_abcd_expansion(bearABar, bearA, bearBBar, bearB, bearCBar, bearC, bearDBar, bearD, bar_index, false, color.red)
+        bearD := low
+        bearDBar := bar_index
+    else if bearState == 4
+        if bar_index - swingRight - bearPhaseStart > maxBarsFromExtensionBreakToD
             bearState := 0
+        else
+            if low < bearD
+                bearD := low
+                bearDBar := bar_index
+            if not na(pivotHigh) and bar_index - swingRight > bearPhaseStart
+                entryLevel := (bearD + bearC) / 2
+                if bearABar < bearBBar and bearBBar < bearCBar and bearCBar < bearDBar
+                    bearishSignal := true
+                    stopAnchor := stopMode == "Conservative" ? bearC : bearA
+                    targetLevel := bearC + (bearB - bearA) * 2.618
+                    if showAbcdStructure
+                        f_draw_abcd_expansion(bearABar, bearA, bearBBar, bearB, bearCBar, bearC, bearDBar, bearD, bar_index, false, color.red)
+                bearState := 0
 
-plotshape(bullishSignal, "Bullish SFP / B&R Entry", shape.circle, location.belowbar, color.lime, size = size.small, text = "BUY")
-plotshape(bearishSignal, "Bearish SFP / B&R Entry", shape.circle, location.abovebar, color.red, size = size.small, text = "SELL")
+plotshape(bullishSignal, "Bullish A-B-C-D-E Entry", shape.circle, location.belowbar, color.lime, size = size.small, text = "BUY")
+plotshape(bearishSignal, "Bearish A-B-C-D-E Entry", shape.circle, location.abovebar, color.red, size = size.small, text = "SELL")
 plot(stopAnchor, "Stop Anchor", color = color.new(color.red, 0), style = plot.style_cross, linewidth = 2)
 plot(targetLevel, "Target Level", color = color.new(color.aqua, 0), style = plot.style_cross, linewidth = 2)
 plot(entryLevel, "Entry Level", color = color.new(color.yellow, 0), style = plot.style_cross, linewidth = 2)
@@ -361,8 +210,6 @@ plot(entryLevel, "Entry Level", color = color.new(color.yellow, 0), style = plot
 // Confidence dots use chart-bar volume direction. TradingView volume has no
 // true bid/ask split, so this is the closest portable equivalent to cTrader's
 // lower-timeframe tick-volume classification.
-majorHigh = ta.pivothigh(high, majorLeft, majorRight)
-majorLow = ta.pivotlow(low, majorLeft, majorRight)
 minorHigh = pivotHigh
 minorLow = pivotLow
 var array<label> majorDotLabels = array.new<label>()
@@ -401,22 +248,7 @@ if minorDot
     if minorDotLabels.size() > maxConfidenceDots
         label.delete(minorDotLabels.shift())
 
-// Drawn ONCE, in full, the moment a run ends - not built up bar-by-bar by
-// mutating one persisted box object (that incremental box.set_right/
-// set_top/set_bottom-per-bar pattern, borrowed from the BigBeluga
-// consolidation template, was placing the box at the wrong price: its
-// setters don't reliably keep tracking a live-growing box under
-// xloc.bar_time the way its own line/label-based objects did). Using [1]
-// below reads the run's final bar - consolidationHigh/Low/lowAdx have
-// already reset for the CURRENT bar by the time consolidating flips false.
-var int consolStartTime = na
-if lowAdx and not lowAdx[1]
-    consolStartTime := time
-
-if highlightConsolidation and not consolidating and consolidating[1]
-    box.new(left = consolStartTime, top = consolidationHigh[1], right = time[1], bottom = consolidationLow[1], xloc = xloc.bar_time, border_color = color.new(color.orange, 25), bgcolor = color.new(color.orange, 88))
-
-alertcondition(bullishSignal, "Bullish SFP / B&R Entry", "Bullish SFP / B&R entry on {{ticker}}")
-alertcondition(bearishSignal, "Bearish SFP / B&R Entry", "Bearish SFP / B&R entry on {{ticker}}")
+alertcondition(bullishSignal, "Bullish A-B-C-D-E Entry", "Bullish A-B-C-D-E entry on {{ticker}}")
+alertcondition(bearishSignal, "Bearish A-B-C-D-E Entry", "Bearish A-B-C-D-E entry on {{ticker}}")
 alertcondition((majorDot and majorCode == 1) or (minorDot and minorCode == 1), "Green Confidence Dot", "Green confidence dot on {{ticker}}")
 alertcondition((majorDot and majorCode == -1) or (minorDot and minorCode == -1), "Red Confidence Dot", "Red confidence dot on {{ticker}}")

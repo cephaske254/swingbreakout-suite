@@ -6,13 +6,12 @@ using cAlgo.API.Indicators;
 namespace cAlgo
 {
     // =========================================================================
-    // SwingBreakoutTrader - execution half of the SFP/B&R indicator/bot pair.
-    // See STRATEGY.md for the full trading method (with diagrams) that this
-    // pair implements.
+    // SwingBreakoutTrader - execution half of the swing-pivot A-B-C-D-E
+    // indicator/bot pair. See STRATEGY.md for the full trading method (with
+    // diagrams) that this pair implements.
     //
-    // All signal detection (SFP and B&R level reactions across every
-    // tracked level, the A-B-C-D fib-extension entry sequence, the SMA
-    // trend-regime filter) lives in SwingBreakoutSFPSignal.cs (the
+    // All signal detection (confirmed swing pivots triggering the A-B-C-D
+    // fib-extension entry sequence) lives in SwingBreakoutSFPSignal.cs (the
     // Indicator), which stays pure - no order or position logic. This bot
     // drives that indicator via Indicators.GetIndicator<SwingBreakoutSFPSignal>(...)
     // in OnStart() and only handles execution: position sizing, stop/target
@@ -21,7 +20,7 @@ namespace cAlgo
     // clustering, opposite-direction blocking).
     //
     // *** PARAMETER ORDER IS LOAD-BEARING - READ THIS BEFORE EDITING ***
-    // The 10 "Shared Signal Config" parameters below (Shared Signal Config
+    // The "Shared Signal Config" parameters below (Shared Signal Config
     // group, ending at MinSweepDepthATRmult) are forwarded to the indicator
     // POSITIONALLY via GetIndicator<T>(...) in OnStart() - they must appear
     // in the SAME ORDER as SwingBreakoutSFPSignal.cs declares its own
@@ -32,7 +31,7 @@ namespace cAlgo
     // Everything below that (Risk/Filters/Session groups) is execution-only
     // and NOT passed to the indicator - safe to add/reorder those freely.
     //
-    // Each of these 10 parameters' DEFAULT VALUE comes from
+    // Each of these shared parameters' DEFAULT VALUE comes from
     // SharedSignalDefaults.cs (in the indicator project) instead of being
     // hardcoded twice, so the two files can't drift on default values the
     // way they still can on order/names - change a default in one place.
@@ -50,21 +49,26 @@ namespace cAlgo
     // SwingBreakoutSFPSignal.cs's header for the full setup notes and a
     // fallback plan if you hit a CT0003 "single algo type" build error.
     //
-    // ENTRY: the standard entry trigger is a signal from the indicator
+    // ENTRY: the only entry trigger is a signal from the indicator
     // (BullishSignal/BearishSignal on the just-closed bar) - fired when the
     // D is confirmed after the A-B-C 100% expansion, then places a limit
-    // order at the 50% D-C retracement level. Optionally,
-    // Enable Confidence Mode
-    // also trades confirmed green confidence dots as buys and red dots as
-    // sells. OnBarClosed reads the enabled signals and hands them to
-    // TryEnter.
+    // order at the 50% D-C retracement level. OnBarClosed reads the signal
+    // and hands it to TryEnter. The indicator's Confidence Dots are a
+    // visual-only overlay - the Robot never trades off them (it used to,
+    // via an "Enable Confidence Mode" toggle, which was removed because it
+    // silently opened positions that don't correspond to any A-B-C-D-E
+    // structure drawn on the chart, confusing what the bot was doing
+    // relative to what the indicator visibly shows).
     //
     // TRADE MANAGEMENT:
     //   - Stop-loss and take-profit are both dictated by the strategy
-    //     itself and used as-is, with NO buffer, floor, ceiling, or R:R
-    //     hierarchy applied on top: StopAnchor is C (StopLossMode.
-    //     Conservative) or A (StopLossMode.Normal), and TargetLevel is the
-    //     261.8% A-B-C expansion. See STRATEGY.md.
+    //     itself and used as-is, with NO buffer, floor, or ceiling applied
+    //     on top: StopAnchor is C (StopLossMode.Conservative) or A
+    //     (StopLossMode.Normal), and TargetLevel is the 261.8% A-B-C
+    //     expansion. See STRATEGY.md. The one exception is
+    //     MinRiskRewardRatio, which filters out (does not enter) a setup
+    //     whose resulting reward:risk at E falls short, since D's extension
+    //     distance varies setup to setup.
     //   - Min/Max risk amount (MinRiskAmount/MaxRiskAmount, account
     //     currency, 0 = off): estimates the trade's dollar risk from
     //     stopLossPips x Symbol.PipValue x volume and skips the trade if it
@@ -125,26 +129,8 @@ namespace cAlgo
         [Parameter("Swing Lookback - Right Bars", DefaultValue = SharedSignalDefaults.SwingRightBars, MinValue = 1, MaxValue = 50, Group = "Shared Signal Config")]
         public int SwingRightBars { get; set; }
 
-        [Parameter("Track Prior Swing High/Low", DefaultValue = SharedSignalDefaults.TrackPriorSwing, Group = "Shared Signal Config")]
-        public bool TrackPriorSwing { get; set; }
-
-        [Parameter("Track Prior Day High/Low/Close", DefaultValue = SharedSignalDefaults.TrackPDHPDL, Group = "Shared Signal Config")]
-        public bool TrackPDHPDL { get; set; }
-
-        [Parameter("Track Month-to-Date Close High/Low (HCOM/LCOM)", DefaultValue = SharedSignalDefaults.TrackHcomLcom, Group = "Shared Signal Config")]
-        public bool TrackHcomLcom { get; set; }
-
-        [Parameter("Higher Timeframe (for SMA trend filter)", DefaultValue = SharedSignalDefaults.TrendTimeFrame, Group = "Shared Signal Config")]
-        public TimeFrame TrendTimeFrame { get; set; }
-
-        [Parameter("Require SMA trend filter (direction + separation)", DefaultValue = SharedSignalDefaults.RequireTrendFilter, Group = "Shared Signal Config")]
-        public bool RequireTrendFilter { get; set; }
-
         [Parameter("ATR Period", DefaultValue = SharedSignalDefaults.AtrPeriod, MinValue = 1, Group = "Shared Signal Config")]
         public int AtrPeriod { get; set; }
-
-        [Parameter("Min. Sweep/Break Depth beyond level (x ATR)", DefaultValue = SharedSignalDefaults.MinSweepDepthATRmult, MinValue = 0.0, Step = 0.05, Group = "Shared Signal Config")]
-        public double MinSweepDepthATRmult { get; set; }
 
         [Parameter("Stop-Loss Mode", DefaultValue = SharedSignalDefaults.StopMode, Group = "Shared Signal Config")]
         public StopLossMode StopMode { get; set; }
@@ -159,14 +145,11 @@ namespace cAlgo
         [Parameter("Enable Trading (OFF = no new entries, total override)", DefaultValue = true, Group = "Master Switch")]
         public bool EnableTrading { get; set; }
 
-        [Parameter("Enable Confidence Mode (green = buy, red = sell)", DefaultValue = false, Group = "Master Switch")]
-        public bool EnableConfidenceMode { get; set; }
-
         // === Risk / trade management ==========================================
         // Stop-loss and take-profit are both dictated by the strategy itself
         // (the indicator's StopAnchor = A or C per StopMode, and TargetLevel
-        // = the 261.8% A-B-C expansion) - no ATR buffer, floor, ceiling, or
-        // R:R hierarchy is applied on top. See STRATEGY.md.
+        // = the 261.8% A-B-C expansion) - no ATR buffer, floor, or ceiling is
+        // applied on top. See STRATEGY.md.
         [Parameter("Volume (lots)", DefaultValue = 0.01, MinValue = 0.01, Step = 0.01, Group = "Risk")]
         public double VolumeInLots { get; set; }
 
@@ -175,6 +158,14 @@ namespace cAlgo
 
         [Parameter("Max. risk per trade, account currency (0 = off)", DefaultValue = 15.0, MinValue = 0.0, Step = 1.0, Group = "Risk")]
         public double MaxRiskAmount { get; set; }
+
+        // Stop and target are both dictated by the A-B-C-D-E math (see
+        // STRATEGY.md), so the resulting R:R varies setup to setup depending
+        // on how far D extended past the 100% expansion. This filters out
+        // any setup whose resulting R:R falls short, rather than adjusting
+        // the stop/target themselves.
+        [Parameter("Min. Risk:Reward Ratio (0 = off)", DefaultValue = 1.7, MinValue = 0.0, Step = 0.1, Group = "Risk")]
+        public double MinRiskRewardRatio { get; set; }
 
         // Defaulted for XAUUSD as the primary/tested instrument. If running
         // this on a tighter-spread symbol (e.g. NAS100), lower this to
@@ -247,10 +238,7 @@ namespace cAlgo
             // MUST MATCH SwingBreakoutSFPSignal.cs's own [Parameter]
             // declaration order exactly. See the class header.
             _signal = Indicators.GetIndicator<SwingBreakoutSFPSignal>(
-                SwingLeftBars, SwingRightBars,
-                TrackPriorSwing, TrackPDHPDL, TrackHcomLcom, TrendTimeFrame,
-                RequireTrendFilter,
-                AtrPeriod, MinSweepDepthATRmult, StopMode);
+                SwingLeftBars, SwingRightBars, AtrPeriod, StopMode);
 
             _atr = Indicators.AverageTrueRange(AtrPeriod, MovingAverageType.WilderSmoothing);
             Positions.Closed += OnPositionClosed;
@@ -298,13 +286,9 @@ namespace cAlgo
                 return;
 
             if (_signal.BearishSignal[index] > 0.5)
-                TryEnter(-1, index, _signal.EntryLevel[index], _signal.StopAnchor[index], _signal.TargetLevel[index], _signal.OrderCancellationLevel[index], true);
+                TryEnter(-1, index, _signal.EntryLevel[index], _signal.StopAnchor[index], _signal.TargetLevel[index], _signal.OrderCancellationLevel[index]);
             if (_signal.BullishSignal[index] > 0.5)
-                TryEnter(1, index, _signal.EntryLevel[index], _signal.StopAnchor[index], _signal.TargetLevel[index], _signal.OrderCancellationLevel[index], true);
-            if (EnableConfidenceMode && _signal.ConfidenceSellSignal[index] > 0.5)
-                TryEnter(-1, index, Bars.ClosePrices[index], _signal.ConfidenceStopAnchor[index], _signal.ConfidenceTargetLevel[index], double.NaN, false);
-            if (EnableConfidenceMode && _signal.ConfidenceBuySignal[index] > 0.5)
-                TryEnter(1, index, Bars.ClosePrices[index], _signal.ConfidenceStopAnchor[index], _signal.ConfidenceTargetLevel[index], double.NaN, false);
+                TryEnter(1, index, _signal.EntryLevel[index], _signal.StopAnchor[index], _signal.TargetLevel[index], _signal.OrderCancellationLevel[index]);
 
             _lastProcessedIndex = index;
         }
@@ -394,18 +378,15 @@ namespace cAlgo
         // stopLevel and targetLevel come straight from the indicator's
         // StopAnchor/TargetLevel outputs - the strategy (STRATEGY.md) fully
         // specifies both, so they're used as-is, with no ATR buffer, floor,
-        // ceiling, or R:R hierarchy layered on top. Primary signals place
-        // continuation stop orders at entryLevel; confidence signals retain
-        // their market-entry behavior.
-        private void TryEnter(int dir, int index, double entryLevel, double stopLevel, double targetLevel, double cancellationLevel, bool placeLimitOrder)
+        // ceiling, or R:R hierarchy layered on top. Always places a resting
+        // limit order at entryLevel (E, the 50% D-C retracement) rather
+        // than entering at market.
+        private void TryEnter(int dir, int index, double entryLevel, double stopLevel, double targetLevel, double cancellationLevel)
         {
             if (!EnableTrading)
                 return;
 
-            if (_signal.ConsolidationActive[index] > 0.5)
-                return;
-
-            if (double.IsNaN(entryLevel) || double.IsNaN(stopLevel) || double.IsNaN(targetLevel) || (placeLimitOrder && double.IsNaN(cancellationLevel)))
+            if (double.IsNaN(entryLevel) || double.IsNaN(stopLevel) || double.IsNaN(targetLevel) || double.IsNaN(cancellationLevel))
                 return;
 
             if (SpreadTooWide())
@@ -418,8 +399,7 @@ namespace cAlgo
             var myPositions = GetMyPositions();
             var myPendingOrders = GetMyPendingOrders();
             bool alreadySameDirection = myPositions.Exists(p => p.TradeType == tradeType);
-            bool pendingSameDirection = myPendingOrders.Exists(p => p.TradeType == tradeType);
-            if (!AllowMultiplePositions && (alreadySameDirection || pendingSameDirection))
+            if (!AllowMultiplePositions && alreadySameDirection)
                 return;
 
             // Don't sell into an open buy, or buy into an open sell. An
@@ -435,12 +415,9 @@ namespace cAlgo
             }
 
             double price = entryLevel;
-            if (placeLimitOrder)
-            {
-                bool isValidLimitPrice = dir == 1 ? price < Symbol.Ask : price > Symbol.Bid;
-                if (!isValidLimitPrice)
-                    return;
-            }
+            bool isValidLimitPrice = dir == 1 ? price < Symbol.Ask : price > Symbol.Bid;
+            if (!isValidLimitPrice)
+                return;
 
             // Don't re-enter the same direction right on top of the last
             // entry in that direction - that's what turns a ranging market
@@ -467,10 +444,12 @@ namespace cAlgo
             bool targetOnCorrectSide = dir == 1 ? targetLevel > price : targetLevel < price;
             if (!targetOnCorrectSide)
                 return;
+
             double takeProfitDistance = Math.Abs(targetLevel - price);
+            if (MinRiskRewardRatio > 0 && takeProfitDistance / stopDistance < MinRiskRewardRatio)
+                return;
 
             double stopLossPips = stopDistance / Symbol.PipSize;
-            double takeProfitPips = takeProfitDistance / Symbol.PipSize;
 
             double volume = Symbol.QuantityToVolumeInUnits(VolumeInLots);
 
@@ -488,18 +467,19 @@ namespace cAlgo
             if (MaxRiskAmount > 0 && estimatedRiskAmount > MaxRiskAmount)
                 return;
 
-            var result = placeLimitOrder
-                ? PlaceLimitOrder(tradeType, SymbolName, volume, price, Label, stopLevel, targetLevel, ProtectionType.Absolute)
-                : ExecuteMarketOrder(tradeType, SymbolName, volume, Label, stopLossPips, takeProfitPips);
-            if (!placeLimitOrder && result.IsSuccessful && result.Position != null)
+            // A completed same-direction setup supersedes an older pending
+            // setup only after it has passed every execution filter above.
+            foreach (var order in myPendingOrders)
             {
-                _originalRiskDistance[result.Position.Id] = stopDistance;
-                if (dir == 1)
-                    _lastLongEntryPrice = result.Position.EntryPrice;
-                else
-                    _lastShortEntryPrice = result.Position.EntryPrice;
+                if (order.TradeType == tradeType)
+                {
+                    CancelPendingOrder(order);
+                    _pendingOrderCancellationLevels.Remove(order.Id);
+                }
             }
-            else if (placeLimitOrder && result.IsSuccessful && result.PendingOrder != null)
+
+            var result = PlaceLimitOrder(tradeType, SymbolName, volume, price, Label, stopLevel, targetLevel, ProtectionType.Absolute);
+            if (result.IsSuccessful && result.PendingOrder != null)
             {
                 _pendingOrderCancellationLevels[result.PendingOrder.Id] = cancellationLevel;
             }

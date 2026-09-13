@@ -6,16 +6,6 @@ which is the complete, deliberately scoped specification for this pair
 section is explicit that nothing beyond what it describes is in scope -
 these are observations about the existing build, not a backlog.
 
-## Trend filter is SMA-based
-
-`RequireTrendFilter` gates entries on a 20/200 SMA pair on `TrendTimeFrame`
-(`TrendFilterOK` in `SwingBreakoutSFPSignal.cs`). An alternative would be to
-derive direction from the swing sequence itself (higher-highs/higher-lows
-vs. lower-highs/lower-lows) instead of a moving average, reusing the same
-swing-detection machinery the A-B-C-D sequence already runs rather than a
-second, unrelated indicator family. Worth considering if the SMA filter
-ever needs replacing, not a defect in the current design.
-
 ## Only one active swing is tracked per side
 
 The indicator remembers "the current unbroken swing high" and "the current

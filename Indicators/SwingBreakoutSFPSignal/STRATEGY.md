@@ -3,96 +3,60 @@
 This file captures the complete trading approach the user described, in
 their own terms, as the basis for reworking the indicator/bot pair.
 
-## Levels marked on the chart
+## What this detects
 
-- **PDH / PDL / PDC** — previous day's high, low, and close.
-- **HCOM / LCOM** — highest and lowest *daily close* within the current
-  month (month-to-date), not intraday high/low.
-
-(Weekly/Monthly Opening Range and the higher-timeframe swing high/low were
-in the original indicator but are not part of the user's method — removed.)
+A confirmed swing pivot is the only trigger — there is no level-reaction
+(SFP/B&R), PDH/PDL/PDC, or HCOM/LCOM step anymore. A fresh A→B→C→D→E
+attempt starts directly from any confirmed swing high (bearish) or swing
+low (bullish).
 
 ## Chart timeframe
 
-The user trades the **1-minute chart**. This matters for detection, not just
-preference: a break → retest → reversal sequence that plays out as several
-distinct 1-minute bars can collapse into what *looks like* a single wick on
-a 15-minute or 1-hour chart — the higher timeframe hides the exact
-mechanics. SFP and B&R must therefore be detected on the actual execution
-timeframe (1-minute), not inferred from a coarser one.
+The user trades the **1-minute chart**. The indicator runs swing detection
+and ATR against whatever timeframe the chart (`Bars`) is attached to, so
+running it on M1 already works.
 
-The indicator already supports this structurally: swing detection, SFP/B&R
-detection, and ATR all run against whatever timeframe the chart (`Bars`) is
-attached to, so running it on M1 already works. PDH/PDL/PDC/HCOM/LCOM are
-still correctly pulled from daily bars regardless of the chart's own
-timeframe.
+## How a swing pivot is detected — and why it auto-scales to any swing size
 
-## What happens when price visits a level
+A bar at index `i` is a confirmed swing high/low once `left` bars before it
+and `right` bars after it are all strictly less extreme — a pure shape
+comparison over a fixed *bar-count* window, with no fixed price or ATR
+distance involved anywhere in the test. That's what makes the same
+detection logic find a 5-pip swing and a 500-pip swing identically: it's
+asking "is this bar more extreme than its N neighbors on each side," not
+"did price move X amount." A quiet, low-volatility instrument and a
+fast-moving one both produce swings the pivot test finds the same way, at
+whatever size those swings actually are.
 
-When price visits one of the marked levels, one of two outcomes plays out:
-
-- **SFP (Swing Failure Pattern)** — price breaks through the level (a wick/
-  sweep), fails to hold beyond it, and reverses to the opposite side.
-- **B&R (Break & Retest)** — price breaks through the level, pulls back to
-  retest it, then continues in the breakout direction.
-
-## How SFP and B&R are detected
-
-Both are evaluated per bar against every enabled level (PDH/PDL/PDC,
-HCOM/LCOM, swing high/low), using the same `MinSweepDepthATRmult × ATR`
-distance threshold so a bare tick through the level doesn't count.
-
-### SFP (Swing Failure Pattern) — single bar
-
-- **Bullish SFP** at a level: the bar's low trades at least
-  `MinSweepDepthATRmult × ATR` below the level, and the same bar's close is
-  back above the level.
-- **Bearish SFP**: mirrored (high sweeps above the level by the threshold,
-  close ends back below it).
-
-One bar is enough — the wick-through and the close-back-through both happen
-on the same bar.
-
-![SFP detection diagram](../../sfp-detection-diagram.svg)
-
-### B&R (Break & Retest) — two bars minimum, no fixed window
-
-1. **Break bar**: a bar *closes* beyond the level by at least
-   `MinSweepDepthATRmult × ATR` (bullish: close above the level + threshold;
-   bearish: mirrored). This is a real break, not a wick — the level gave way.
-   The level is now "pending" for this direction.
-2. **Retest (unbounded in time)**: from that point on, watch for a
-   **retest bar** — one whose wick comes back and touches the level
-   (bullish: low ≤ level) while its **close stays on the breakout side**
-   (bullish: close still above the level). That means the level held as new
-   support/resistance instead of being reclaimed. There's no fixed number of
-   bars to wait — retests can take anywhere from a couple of bars to a long
-   stretch, so the pending break just stays open until it resolves one way
-   or the other (see the invalidation rule below).
-3. Once a retest bar appears, **B&R is confirmed on that bar** — it becomes
-   the trigger point (same role as the SFP bar) that establishes direction
-   and kicks off the A→B→C→D sequence below.
-4. **Invalidation**: if price closes back through the level in the failure
-   direction before a valid retest happens, the pending break is cleared —
-   no B&R is registered for it, and the level goes back to being
-   unbroken/available for a fresh break or SFP later.
-
-![B&R detection diagram](../../bnr-detection-diagram.svg)
+There are two independent lookback windows:
+- **Minor** (`SwingLeftBars`/`SwingRightBars`, default 5/5) — used to find
+  B, C, and D once a setup is underway, and for the fine-grained
+  Confidence Dots tier.
+- **Major** (`MajorSwingLeftBars`/`MajorSwingRightBars`, default 15/15) —
+  used to find **A**, the trigger. A 5/5 fractal test alone fires on nearly
+  every noise-sized wiggle, which would spawn a fresh conflicting setup on
+  almost every ranging stretch. Requiring more neighboring bars to agree
+  before A is accepted filters that out while staying scale-relative (it's
+  still a bar-count shape test, not a fixed price/ATR threshold) — so it
+  finds big and small *major* swings the same way, it just won't fire on
+  minor ones.
 
 ## Entry sequence (buy setup — mirror for sell)
 
-Once a level has been identified as held (B&R) or failed (SFP) and direction
-is established:
-
-1. **A** = the current/recent swing low.
+1. **A** = a confirmed Major swing low.
 2. **B** = the top of the first leg up from A (the high before the first
    retracement starts).
 3. **C** = the bottom of the first retracement (where the pullback ends and
-   price turns back up).
+   price turns back up). The retracement must reach at least 50% of A→B:
+   C is at or below the A/B midpoint for a buy (mirrored above it for a
+   sell).
 4. Draw a Fibonacci **extension** using A → B → C. Wait for price to break
    past the **100% extension level** (this sits above B — it's C plus the
    full A→B leg length, not just a new high above B).
-5. That breakout produces a **new high, D**.
+5. Track the post-break extreme as **D**. It is finalized only when the
+   opposite retracement pivot confirms (a pullback low after a bullish D, or
+   pullback high after a bearish D), and that confirmation must occur within
+   `Max. Bars from 100% Break to D` (80 by default).
 6. Draw a standard Fibonacci **retracement** tool from D to C.
 7. **E** is the 50% D→C retracement level. Place a **buy limit / sell limit
    order**, rather than entering immediately, at E.
@@ -104,9 +68,9 @@ is established:
    - **Conservative mode** → SL at **C**.
    - **Normal mode** → SL at **A**.
 9. **Target**: the **261.8%** A→B→C expansion, projected from C:
-    **Target = C + (B − A) × 2.618**
+   **Target = C + (B − A) × 2.618**
 
-Sell setups mirror all of the above (A = swing high, B = bottom of first leg
+Sell setups mirror all of the above (A = Major swing high, B = bottom of first leg
 down, C = top of first retracement, D = new low past the 100% expansion, E
 = the 50% D→C limit-order level, SL above C or A, target below C at the same
 2.618x A→B→C expansion).
@@ -115,8 +79,11 @@ down, C = top of first retracement, D = new low past the 100% expansion, E
 
 ## Status
 
-This is the complete strategy as described by the user. No additional risk
-management, session/timing rules, or filters beyond what's written above.
+This is the complete strategy as described by the user. No level reaction,
+SFP/B&R, PDH/PDL/PDC, HCOM/LCOM, or micro-structure-shift confluence is part
+of it anymore — a confirmed swing pivot alone starts the A→B→C→D→E sequence.
+No additional risk management, session/timing rules, or filters beyond
+what's written above.
 
 ## Implementation notes
 
@@ -124,19 +91,16 @@ This strategy is implemented in `SwingBreakoutSFPSignal.cs` (detection) and
 `Swingbreakouttrader.cs` (execution). A few implementation decisions were
 made that weren't explicitly specified and are worth reviewing:
 
-- **B&R retest window**: unbounded, per the user (see above) - a break stays
-  pending until it's retested or invalidated, with no bar-count limit.
-- **B&R level tracking**: a single pending-break tracker per direction
-  (bullish/bearish), not one per individual level type - the first enabled
-  level whose break condition fires arms it. Mirrors how SFP already ORs
-  across enabled levels rather than tracking each independently.
-- **A, during "seeking B"**: tracked as the running extreme (lowest low for
-  a bullish setup) since the trigger bar, rather than fixed at the trigger
-  bar's own extreme - avoids getting stuck on a stale anchor if price makes
-  a lower low before the first leg actually starts.
-- **B, during "seeking C"**: if a new, more extreme pivot forms before a
-  retracement is confirmed, B is extended to it rather than treated as the
-  final leg top.
+- **Nearest structure**: A is fixed to the triggering pivot bar. B is the
+  first valid same-direction pivot after A, and C is the first valid
+  retracement pivot after B; later, more extreme pivots do not stretch an
+  in-progress setup into a longer swing.
+- **Overlapping setups (cTrader)**: up to three active A→B→C→D sequences are
+  retained independently in each direction. A new triggering pivot uses an
+  idle slot and does not discard an older valid setup. When a newer
+  completed setup passes all execution filters, its pending limit order
+  replaces an older same-direction pending order, so only the most recent
+  order can fill.
 - **Entry order**: once D confirms beyond the 100% expansion, the Robot
   places a limit order at E, the 50% D→C retracement. It does not enter at
   market; the order fills only if price revisits E. If price returns to D
@@ -146,5 +110,10 @@ made that weren't explicitly specified and are worth reviewing:
 - **Stop-Loss Mode** (`StopMode`: Conservative = SL at C, Normal = SL at A)
   defaults to **Normal** - the user didn't specify a default.
 - The Robot's stop and target are used exactly as the indicator computes
-  them - no ATR buffer, minimum/maximum distance, or Risk:Reward hierarchy
-  is layered on top anymore, since the strategy fully specifies both.
+  them - no ATR buffer or minimum/maximum distance is layered on top, since
+  the strategy fully specifies both. The one exception is `MinRiskRewardRatio`
+  (default 1.7, 0 = off): since D's extension distance past the 100% break
+  varies setup to setup, the resulting reward:risk isn't fixed by the A→B→C
+  math alone, so the Robot filters out (does not enter) any setup whose
+  reward:risk at E falls short of this ratio, rather than adjusting the
+  stop/target themselves.
